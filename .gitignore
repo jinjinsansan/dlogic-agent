@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.env.local
+*.egg-info/
+dist/
+build/
+.venv/
+logs/
+memory/users.json
+memory/line_users.json
