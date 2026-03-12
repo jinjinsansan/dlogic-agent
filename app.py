@@ -1,4 +1,4 @@
-"""LINE Bot webhook server — designed for Gunicorn + gevent workers."""
+"""LINE Bot webhook server + WebApp chat API — designed for Gunicorn + gevent workers."""
 
 import json
 import logging
@@ -7,9 +7,11 @@ import sys
 from datetime import datetime, timedelta
 
 from flask import Flask, request, abort, Response
+from flask_cors import CORS
 from linebot.v3.exceptions import InvalidSignatureError
 
 from bot.line_handlers import handler as line_handler
+from api.web_chat import bp as web_chat_bp
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -19,6 +21,22 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 flask_app = Flask(__name__)
+
+# CORS for WebApp chat (allow frontend origin)
+CORS(flask_app, resources={
+    r"/api/*": {
+        "origins": [
+            "https://www.dlogicai.in",
+            "https://dlogicai.in",
+            "http://localhost:3000",  # dev
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type"],
+    }
+})
+
+# Register WebApp chat blueprint
+flask_app.register_blueprint(web_chat_bp)
 
 # Prefetch data directory
 PREFETCH_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'prefetch')

@@ -18,24 +18,14 @@ from linebot.v3.messaging import (
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent
 
-from agent.engine import (
-    call_claude, build_system_prompt, extract_text, get_tool_blocks,
-    format_tool_notification, format_tools_used_footer,
-    trim_history, extract_memories, HEAVY_TOOLS,
-)
-from agent.response_cache import (
-    detect_query_type, find_race_id,
-    get as get_cached_response, save as save_cached_response,
-    TOOL_QUERY_MAP,
-)
-from agent.template_router import match_route, route_and_respond
-from config import LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, MAX_TOOL_TURNS, ONBOARDING_TEXT
+from agent.engine import trim_history
+from agent.chat_core import run_agent
+from agent.response_cache import find_race_id
+from config import LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, ONBOARDING_TEXT
 from db.user_manager import (
     get_or_create_user as db_get_or_create_user,
     get_memories as db_get_memories,
-    add_memories as db_add_memories,
     clear_memories as db_clear_memories,
-    build_user_context as db_build_user_context,
     get_transfer_code as db_get_transfer_code,
     transfer_account as db_transfer_account,
     is_maintenance_mode,
@@ -511,220 +501,56 @@ def handle_message(event: MessageEvent):
                        quick_reply=honmei_qr)
                 return
 
-    # Build user context from Supabase
-    memories = db_get_memories(profile["id"])
-    user_context = db_build_user_context(profile, memories)
-
-    # Inject honmei status for active race so agent doesn't re-ask
-    active_rid = _user_active_race.get(user_id)
-    if active_rid:
-        existing_pick = db_check_prediction(profile["id"], active_rid)
-        if existing_pick:
-            user_context += (
-                f"\n\n【本命登録済み】レース {active_rid} の本命は "
-                f"{existing_pick['horse_number']}番 {existing_pick['horse_name']} で登録済み。"
-                f"このレースの本命は再度聞かないこと。"
-            )
-
-    system = build_system_prompt(user_context)
-
     # Get or create conversation history
     history = user_conversations.get(user_id, [])
-    history = trim_history(history)
 
-    # ── Template router: bypass Claude for deterministic queries ──
-    route = match_route(user_text)
-    if route:
-        route_name, route_params = route
-        logger.info(f"Template route matched: {route_name} for LINE user={user_id}")
-        history.append({"role": "user", "content": user_text})
-
-        result = route_and_respond(route_name, route_params, user_id, history, profile)
-        if result:
-            logger.info(f"Template route handled: {route_name} (Claude API skipped)")
-            _reply(event.reply_token, "了解👍")
-
-            # Add tool use history entries for Claude context
-            for entry in result.get("history_entries", []):
-                history.append(entry)
-            user_conversations[user_id] = history
-
-            full_text = result["text"]
-            if result.get("footer"):
-                full_text += "\n\n" + result["footer"]
-            qr = get_quick_reply(result["tools_used"])
-
-            # Integrate honmei into same message to save push quota
-            active_race_id = result.get("active_race_id")
-            if active_race_id and set(result["tools_used"]) & {"get_predictions", "get_race_entries"}:
-                already_picked = db_check_prediction(profile["id"], active_race_id)
-                if not already_picked:
-                    _user_active_race[user_id] = active_race_id
-                    honmei_qr = get_honmei_quick_reply(active_race_id)
-                    if honmei_qr:
-                        full_text += (
-                            "\n\n━━━━━━━━━━━━━━━\n"
-                            "📢 みんなの予想\n"
-                            "━━━━━━━━━━━━━━━\n\n"
-                            "お前の本命を教えてくれ！👇"
-                        )
-                        qr = honmei_qr
-
-            _push(user_id, full_text, quick_reply=qr)
-            return
-        else:
-            # Route matched but couldn't handle (e.g., no race_id) — fall through
-            logger.info(f"Template route {route_name} fell through to Claude")
-            history.pop()  # Remove the user message we just added
-
-    # ── Pre-loop cache check (button case: race_id already in history) ──
-    query_type = detect_query_type(user_text)
-    if query_type:
-        race_id = find_race_id(history)
-        if race_id:
-            cached = get_cached_response(race_id, query_type)
-            if cached:
-                logger.info(f"Pre-loop cache hit: {race_id}:{query_type} LINE user={user_id}")
-                _reply(event.reply_token, "了解👍")
-                history.append({"role": "user", "content": user_text})
-                history.append({"role": "assistant", "content": cached["text"]})
-                user_conversations[user_id] = history
-
-                full_text = cached["text"]
-                if cached["footer"]:
-                    full_text += "\n\n" + cached["footer"]
-                qr = get_quick_reply(cached["tools_used"])
-                _push(user_id, full_text, quick_reply=qr)
-                return
-
-    # Reply immediately with "thinking" (LINE reply tokens expire quickly)
-    _reply(event.reply_token, "考え中...")
-
-    history.append({"role": "user", "content": user_text})
+    # Use shared agentic loop
+    active_rid = _user_active_race.get(user_id)
+    replied = False
 
     try:
-        tools_used = []
-        notified_tools = set()
-        response = None
-        active_race_id = None
-        cache_used = False
+        for chunk in run_agent(
+            user_message=user_text,
+            history=history,
+            profile=profile,
+            active_race_id_hint=active_rid,
+        ):
+            chunk_type = chunk.get("type")
 
-        # Agentic loop
-        for turn in range(MAX_TOOL_TURNS):
-            response = call_claude(history, system)
+            if chunk_type == "thinking" and not replied:
+                # Reply immediately (LINE reply tokens expire quickly)
+                _reply(event.reply_token, "考え中...")
+                replied = True
 
-            if response.stop_reason == "end_turn":
-                history.append({"role": "assistant", "content": response.content})
-                break
+            elif chunk_type == "done":
+                if not replied:
+                    _reply(event.reply_token, "了解👍")
+                    replied = True
 
-            tool_blocks = get_tool_blocks(response)
-            if not tool_blocks:
-                history.append({"role": "assistant", "content": response.content})
-                break
+                full_text = chunk["text"]
+                tools_used = chunk.get("tools_used", [])
+                active_race_id = chunk.get("active_race_id")
+                user_conversations[user_id] = chunk.get("history", history)
 
-            # ── Mid-loop cache check ──
-            mid_cache = None
-            for tb in tool_blocks:
-                inp = tb.input if isinstance(tb.input, dict) else {}
-                rid = inp.get("race_id")
-                if rid:
-                    active_race_id = rid
-                qt = TOOL_QUERY_MAP.get(tb.name)
-                if rid and qt:
-                    mid_cache = get_cached_response(rid, qt)
-                    if mid_cache:
-                        break
+                # Integrate honmei into same message to save push quota
+                qr = get_quick_reply(tools_used)
+                used_set = set(tools_used)
 
-            if mid_cache:
-                logger.info(f"Mid-loop cache hit: {active_race_id} LINE user={user_id}")
-                history.append({"role": "assistant", "content": mid_cache["text"]})
-                tools_used = mid_cache["tools_used"]
-                cache_used = True
-                break
+                if used_set & {"get_race_entries", "get_predictions"} and active_race_id:
+                    already_picked = db_check_prediction(profile["id"], active_race_id)
+                    if not already_picked:
+                        _user_active_race[user_id] = active_race_id
+                        honmei_qr = get_honmei_quick_reply(active_race_id)
+                        if honmei_qr:
+                            full_text += (
+                                "\n\n━━━━━━━━━━━━━━━\n"
+                                "📢 みんなの予想\n"
+                                "━━━━━━━━━━━━━━━\n\n"
+                                "お前の本命を教えてくれ！👇"
+                            )
+                            qr = honmei_qr
 
-            history.append({"role": "assistant", "content": response.content})
-
-            # Tool notifications disabled to save push message quota
-            # (user sees "考え中..." reply instead)
-
-            # Execute tools
-            tool_context = {"user_profile_id": profile["id"]}
-            tool_results = []
-            for tool_block in tool_blocks:
-                tools_used.append(tool_block.name)
-                inp = tool_block.input if isinstance(tool_block.input, dict) else {}
-                if inp.get("race_id"):
-                    active_race_id = inp["race_id"]
-                logger.info(f"Executing tool: {tool_block.name}")
-                result = execute_tool(tool_block.name, tool_block.input, context=tool_context)
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tool_block.id,
-                    "content": result,
-                })
-
-            history.append({"role": "user", "content": tool_results})
-
-        # Build final response text
-        if cache_used:
-            response_text = mid_cache["text"]
-            footer = mid_cache["footer"]
-        else:
-            if response:
-                response_text = extract_text(response)
-            else:
-                response_text = "ごめん、ちょっと調べすぎちゃった。"
-            if not response_text:
-                response_text = "ごめん、うまく答えられなかった。もう一回聞いてもらえる？"
-            footer = format_tools_used_footer(tools_used)
-
-        full_text = response_text + ("\n\n" + footer if footer else "")
-        user_conversations[user_id] = history
-
-        # ── Post-loop: save to response cache ──
-        if not cache_used and active_race_id:
-            save_qt = detect_query_type(user_text)
-            if save_qt:
-                save_cached_response(active_race_id, save_qt, response_text, footer, tools_used)
-
-        # Auto-extract memories (skip if cache was used or tools were used)
-        # Tool-heavy turns (race data, predictions) don't reveal user preferences
-        _MEMORY_SKIP_TOOLS = {
-            "get_today_races", "get_race_entries", "get_predictions",
-            "get_realtime_odds", "get_race_flow", "get_jockey_analysis",
-            "get_bloodline_analysis", "get_recent_runs", "get_horse_weights",
-            "get_training_comments", "get_stable_comments", "get_engine_stats", "get_odds_probability",
-            "get_prediction_ranking", "search_horse",
-        }
-        skip_memory = cache_used or bool(set(tools_used) & _MEMORY_SKIP_TOOLS)
-        if not skip_memory:
-            try:
-                new_memories = extract_memories(user_text, response_text)
-                if new_memories:
-                    db_add_memories(profile["id"], new_memories)
-                    logger.info(f"New memories for LINE user {user_id}: {new_memories}")
-            except Exception:
-                pass
-
-        # Push final response — integrate honmei into same message to save push quota
-        qr = get_quick_reply(tools_used)
-        used_set = set(tools_used)
-
-        if used_set & {"get_race_entries", "get_predictions"} and active_race_id:
-            already_picked = db_check_prediction(profile["id"], active_race_id)
-            if not already_picked:
-                _user_active_race[user_id] = active_race_id
-                honmei_qr = get_honmei_quick_reply(active_race_id)
-                if honmei_qr:
-                    full_text += (
-                        "\n\n━━━━━━━━━━━━━━━\n"
-                        "📢 みんなの予想\n"
-                        "━━━━━━━━━━━━━━━\n\n"
-                        "お前の本命を教えてくれ！👇"
-                    )
-                    qr = honmei_qr  # Replace quick reply with honmei buttons
-
-        _push(user_id, full_text, quick_reply=qr)
+                _push(user_id, full_text, quick_reply=qr)
 
     except Exception as e:
         logger.exception(f"Error processing LINE message for user {user_id}")
