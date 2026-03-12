@@ -38,6 +38,13 @@ TOOL_LABELS = {
     "get_jockey_analysis": "騎手分析エンジン",
     "get_bloodline_analysis": "血統分析エンジン",
     "get_recent_runs": "直近5走エンジン",
+    "record_user_prediction": "本命登録",
+    "check_user_prediction": "本命確認",
+    "get_my_stats": "成績確認",
+    "get_prediction_ranking": "ランキング取得",
+    "get_odds_probability": "予測勝率算出",
+    "get_stable_comments": "関係者情報取得",
+    "get_engine_stats": "エンジン的中率確認",
 }
 
 # Tools that involve heavy engine computation (notify user about wait time)
@@ -48,11 +55,15 @@ HEAVY_TOOLS = {
 
 
 def call_claude(conversation_history: list[dict], system: str) -> object:
-    """Single Claude API call. Returns the raw response."""
+    """Single Claude API call with prompt caching."""
     return client.messages.create(
         model=CLAUDE_MODEL,
         max_tokens=MAX_TOKENS,
-        system=system,
+        system=[{
+            "type": "text",
+            "text": system,
+            "cache_control": {"type": "ephemeral"},
+        }],
         tools=TOOLS,
         messages=conversation_history,
     )
@@ -60,7 +71,12 @@ def call_claude(conversation_history: list[dict], system: str) -> object:
 
 def build_system_prompt(user_context: str = "") -> str:
     """Build full system prompt with optional user context."""
-    system = SYSTEM_PROMPT
+    from datetime import datetime, timezone, timedelta
+    jst = timezone(timedelta(hours=9))
+    now = datetime.now(jst)
+    weekday_ja = ["月", "火", "水", "木", "金", "土", "日"][now.weekday()]
+    date_line = f"\n\n## 現在の日時\n{now.strftime('%Y年%m月%d日')}（{weekday_ja}） {now.strftime('%H:%M')} JST"
+    system = SYSTEM_PROMPT + date_line
     if user_context:
         system = system + "\n\n" + user_context
     return system
@@ -97,18 +113,27 @@ def format_tool_notification(tool_names: list[str]) -> str:
     return msg
 
 
+_UTILITY_TOOLS = {
+    "get_my_stats", "get_prediction_ranking", "record_user_prediction",
+    "check_user_prediction", "get_engine_stats",
+}
+
+
 def format_tools_used_footer(tools_used: list[str]) -> str:
     """Generate a footer showing which tools/engines were used."""
     if not tools_used:
         return ""
 
-    # Deduplicate while preserving order
+    # Deduplicate while preserving order, skip utility tools
     seen = set()
     unique = []
     for t in tools_used:
-        if t not in seen:
+        if t not in seen and t not in _UTILITY_TOOLS:
             seen.add(t)
             unique.append(t)
+
+    if not unique:
+        return ""
 
     labels = [TOOL_LABELS.get(t, t) for t in unique]
     has_engine = any(t in HEAVY_TOOLS for t in unique)
@@ -153,7 +178,7 @@ def extract_memories(user_message: str, assistant_response: str) -> list[str]:
         return []
 
 
-def trim_history(conversation_history: list[dict], max_turns: int = 20) -> list[dict]:
+def trim_history(conversation_history: list[dict], max_turns: int = 10) -> list[dict]:
     """Trim conversation history to keep only the last N turns to manage context size."""
     if len(conversation_history) <= max_turns * 2:
         return conversation_history

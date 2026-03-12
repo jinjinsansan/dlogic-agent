@@ -3,7 +3,7 @@
 import logging
 from flask import Flask, request, abort
 from linebot.v3.exceptions import InvalidSignatureError
-from bot.line_handlers import handler, load_memory
+from bot.line_handlers import handler
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,6 +35,5 @@ def health():
 
 
 if __name__ == "__main__":
-    load_memory()
     logger.info("Starting LINE Bot server on port 5000")
     app.run(host="0.0.0.0", port=5000)

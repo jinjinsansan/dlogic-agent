@@ -250,6 +250,31 @@ def main():
         except Exception:
             pass
 
+    # レスポンスキャッシュウォーミング（VPS上で実行）
+    logger.info("\n[キャッシュウォーミング]")
+    try:
+        warm_result = subprocess.run(
+            ["ssh", f"{VPS_USER}@{VPS_HOST}",
+             f"cd /opt/dlogic/linebot && /opt/dlogic/linebot/venv/bin/python scripts/warm_cache.py {date_str}"],
+            capture_output=True, text=True, encoding='utf-8', errors='replace',
+            timeout=1800,  # 30 minutes max
+        )
+        for line in warm_result.stdout.split('\n'):
+            line = line.strip()
+            if line and ('OK' in line or 'SKIP' in line or 'FAIL' in line or 'ERROR' in line or '完了' in line):
+                logger.info(f"  {line}")
+        if warm_result.returncode == 0:
+            results.append("キャッシュウォーミング: OK")
+        else:
+            results.append("キャッシュウォーミング: エラー")
+            logger.error(f"  stderr: {warm_result.stderr[:500]}")
+    except subprocess.TimeoutExpired:
+        logger.error("  キャッシュウォーミング タイムアウト（30分）")
+        results.append("キャッシュウォーミング: タイムアウト")
+    except Exception as e:
+        logger.error(f"  キャッシュウォーミング エラー: {e}")
+        results.append(f"キャッシュウォーミング: {e}")
+
     # 古いファイル削除
     cleanup_old_prefetch(keep_days=7, logger=logger)
 

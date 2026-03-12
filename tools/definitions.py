@@ -45,52 +45,16 @@ TOOLS = [
     },
     {
         "name": "get_predictions",
-        "description": "AIによるレース予想を取得します。複数の分析エンジンの予想上位5頭を返します。JRA・地方競馬どちらも対応。出馬表データ（horses, horse_numbers等）が必要なので、先にget_race_entriesで取得してから呼び出してください。",
+        "description": "AIによるレース予想を取得します。複数の分析エンジン（Dlogic/Ilogic/ViewLogic/MetaLogic）の予想上位5頭を返します。JRA・地方競馬どちらも対応。race_idだけで呼べます（出馬表データは自動補完されます）。先にget_race_entriesで出馬表を取得してから呼んでください。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "race_id": {
                     "type": "string",
-                    "description": "netkeiba.comのレースID"
-                },
-                "horses": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "出走馬名のリスト（馬番順）"
-                },
-                "horse_numbers": {
-                    "type": "array",
-                    "items": {"type": "integer"},
-                    "description": "馬番のリスト"
-                },
-                "venue": {
-                    "type": "string",
-                    "description": "競馬場名（例: '中山'）"
-                },
-                "race_number": {
-                    "type": "integer",
-                    "description": "レース番号"
-                },
-                "jockeys": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "騎手名のリスト（馬番順）"
-                },
-                "posts": {
-                    "type": "array",
-                    "items": {"type": "integer"},
-                    "description": "枠番のリスト（馬番順）"
-                },
-                "distance": {
-                    "type": "string",
-                    "description": "距離（例: '芝2000m'）"
-                },
-                "track_condition": {
-                    "type": "string",
-                    "description": "馬場状態（良/稍重/重/不良）"
+                    "description": "レースID（get_race_entriesで取得したもの）"
                 }
             },
-            "required": ["race_id", "horses", "horse_numbers", "venue", "race_number"]
+            "required": ["race_id"]
         }
     },
     {
@@ -110,6 +74,39 @@ TOOLS = [
                 }
             },
             "required": ["race_id", "race_type"]
+        }
+    },
+    {
+        "name": "get_horse_weights",
+        "description": "指定レースの馬体重（当日計量）を取得します。馬番ごとの体重(kg)と前走比増減を返します。馬体重はレース当日の朝〜昼に発表されるため、前日以前は取得できません。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "race_id": {
+                    "type": "string",
+                    "description": "netkeiba.comのレースID（例: '202406050811'）"
+                },
+                "race_type": {
+                    "type": "string",
+                    "enum": ["jra", "nar"],
+                    "description": "レースの種類。jra=中央競馬、nar=地方競馬"
+                }
+            },
+            "required": ["race_id", "race_type"]
+        }
+    },
+    {
+        "name": "get_training_comments",
+        "description": "指定JRAレースの調教評価・厩舎コメントを取得します。各馬の調教短評（例:好調子、気配平凡）、評価ランク（A〜D）、詳細コメントを返します。JRA限定（地方競馬には対応していません）。重要：取得した原文をそのまま出力せず、必ず自分の言葉で要約・言い換えてユーザーに伝えてください。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "race_id": {
+                    "type": "string",
+                    "description": "netkeiba.comのレースID（例: '202406050811'）"
+                }
+            },
+            "required": ["race_id"]
         }
     },
     {
@@ -166,6 +163,115 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "race_id": {"type": "string", "description": "レースID（get_race_entriesで取得したもの）"}
+            },
+            "required": ["race_id"]
+        }
+    },
+    {
+        "name": "record_user_prediction",
+        "description": "ユーザーの本命馬（みんなの予想）を記録します。出馬表や予想を見せた後にユーザーに本命を聞き、回答を受けたらこのツールで記録してください。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "race_id": {
+                    "type": "string",
+                    "description": "レースID"
+                },
+                "horse_number": {
+                    "type": "integer",
+                    "description": "本命馬の馬番"
+                },
+                "horse_name": {
+                    "type": "string",
+                    "description": "本命馬の馬名"
+                },
+                "race_name": {
+                    "type": "string",
+                    "description": "レース名（省略可）"
+                },
+                "venue": {
+                    "type": "string",
+                    "description": "競馬場名（省略可）"
+                }
+            },
+            "required": ["race_id", "horse_number", "horse_name"]
+        }
+    },
+    {
+        "name": "check_user_prediction",
+        "description": "ユーザーが指定レースの本命を既に登録済みか確認します。出馬表や予想を見せる前にこのツールで確認し、未登録なら本命を聞いてください。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "race_id": {
+                    "type": "string",
+                    "description": "レースID"
+                }
+            },
+            "required": ["race_id"]
+        }
+    },
+    {
+        "name": "get_my_stats",
+        "description": "ユーザー自身の「みんなの予想」成績を取得します。的中率、回収率、連勝数、最高配当、直近の予想結果を返します。「俺の成績は？」「的中率は？」「回収率見せて」等の質問で使ってください。",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+    {
+        "name": "get_prediction_ranking",
+        "description": "「みんなの予想」の回収率ランキングを取得します。全ユーザーの中で回収率上位のランキングを返します。「ランキング見せて」「みんなの成績は？」「誰が一番当たってる？」等の質問で使ってください。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "表示人数（デフォルト10）"
+                }
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "get_odds_probability",
+        "description": "出走馬全頭の予測勝率・予測複勝率をオッズから算出します。オッズベースの統計的な勝率・複勝率を返します。出馬表を見せた後に「予測勝率も見るか？」と提案してください。race_idだけで呼べます。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "race_id": {
+                    "type": "string",
+                    "description": "レースID（get_race_entriesで取得したもの）"
+                }
+            },
+            "required": ["race_id"]
+        }
+    },
+    {
+        "name": "get_engine_stats",
+        "description": "予想エンジンの的中率データを取得します。Dlogic/Ilogic/ViewLogic/MetaLogicの各エンジンの単勝的中率・複勝的中率を返します。「エンジンの的中率は？」「どのエンジンが当たる？」「予想精度は？」等の質問で使ってください。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "days": {
+                    "type": "integer",
+                    "description": "集計期間（日数）。デフォルト30日。90や365も可。"
+                }
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "get_stable_comments",
+        "description": "指定レースの関係者情報（陣営の状態・意気込み）を取得します。各馬の状態評価、印、陣営の見解を返します。JRA・地方競馬どちらも対応。「関係者情報は？」「陣営のコメントは？」「関係者の話は？」等の質問で使ってください。【絶対厳守】取得データの原文・引用符付き転載は禁止。必ず自分の分析・要約として「〜の状態は良さそう」「陣営は距離適性に自信あり」のように、お前自身の言葉で伝えろ。一字一句の引用は絶対にするな。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "race_id": {
+                    "type": "string",
+                    "description": "レースID（get_race_entriesで取得したもの）"
+                }
             },
             "required": ["race_id"]
         }

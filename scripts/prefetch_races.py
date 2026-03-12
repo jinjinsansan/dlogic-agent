@@ -12,6 +12,7 @@ Usage:
 """
 
 import json
+import logging
 import os
 import sys
 import time
@@ -20,6 +21,8 @@ import requests
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from dataclasses import dataclass, field, asdict
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # 設定
@@ -48,14 +51,29 @@ def fetch_soup(url, encoding="euc-jp"):
             resp = requests.get(url, timeout=REQUEST_TIMEOUT, headers={
                 "User-Agent": USER_AGENT
             })
+            # Check HTTP status
+            if resp.status_code == 404:
+                print(f"  WARN: HTTP 404 - {url}")
+                return None
+            if resp.status_code >= 400:
+                print(f"  WARN: HTTP {resp.status_code} - {url}")
+                if attempt < MAX_RETRIES - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+                return None
             resp.encoding = encoding
-            return BeautifulSoup(resp.text, "lxml")
+            html_text = resp.text
+            if not html_text or len(html_text.strip()) < 100:
+                print(f"  WARN: Empty response - {url}")
+                return None
+            return BeautifulSoup(html_text, "lxml")
         except Exception as e:
             if attempt < MAX_RETRIES - 1:
                 time.sleep(2 ** attempt)
             else:
                 print(f"  FAIL: {url} - {e}")
                 return None
+    return None
 
 
 # =============================================================================
@@ -102,6 +120,12 @@ def fetch_nar_race_list(date_str):
             race_name_el = li.select_one(".ItemTitle")
             race_name = race_name_el.get_text(strip=True) if race_name_el else f"{race_number}R"
 
+            # 発走時刻
+            start_time = ""
+            time_el = li.select_one(".RaceList_ItemTime")
+            if time_el:
+                start_time = time_el.get_text(strip=True)
+
             distance = ""
             race_data = li.select_one(".RaceList_ItemLong")
             if race_data:
@@ -123,6 +147,7 @@ def fetch_nar_race_list(date_str):
                 "race_name": race_name,
                 "venue": current_venue,
                 "distance": distance,
+                "start_time": start_time,
                 "is_nar": True,
             })
 
@@ -134,6 +159,13 @@ def fetch_nar_entries(race_id):
     url = f"{NETKEIBA_NAR_BASE}/race/shutuba.html?race_id={race_id}"
     soup = fetch_soup(url, encoding="euc-jp")
     if not soup:
+        return None
+
+    # Validate HTML has race data
+    race_table = soup.select_one("table.RaceTable01, table.Shutuba_Table")
+    horse_rows = soup.select("tr.HorseList")
+    if not race_table and not horse_rows:
+        print(f"  WARN: {race_id} - 出馬表テーブルなし（HTML構造変更？）")
         return None
 
     race_name = ""
@@ -228,6 +260,23 @@ def fetch_nar_entries(race_id):
         except (ValueError, IndexError):
             continue
 
+    # Validate: all arrays must be same length
+    num_horses = len(entries["horses"])
+    if num_horses == 0:
+        return None
+
+    array_keys = ["horse_numbers", "jockeys", "posts", "trainers", "sex_ages", "weights"]
+    for key in array_keys:
+        if len(entries[key]) != num_horses:
+            print(f"  WARN: {race_id} {key} length mismatch (horses={num_horses}, {key}={len(entries[key])})")
+            return None
+
+    # Validate: no empty horse names
+    empty_names = sum(1 for h in entries["horses"] if not h or not str(h).strip())
+    if empty_names > num_horses * 0.3:
+        print(f"  WARN: {race_id} too many empty horse names ({empty_names}/{num_horses})")
+        return None
+
     return {
         "race_id_netkeiba": race_id,
         "race_name": race_name,
@@ -282,6 +331,12 @@ def fetch_jra_race_list(date_str):
             race_name_el = li.select_one(".ItemTitle")
             race_name = race_name_el.get_text(strip=True) if race_name_el else f"{race_number}R"
 
+            # 発走時刻
+            start_time = ""
+            time_el = li.select_one(".RaceList_ItemTime")
+            if time_el:
+                start_time = time_el.get_text(strip=True)
+
             distance = ""
             race_data = li.select_one(".RaceList_ItemLong")
             if race_data:
@@ -297,6 +352,7 @@ def fetch_jra_race_list(date_str):
                 "race_name": race_name,
                 "venue": current_venue,
                 "distance": distance,
+                "start_time": start_time,
                 "is_nar": False,
             })
 
@@ -308,6 +364,13 @@ def fetch_jra_entries(race_id):
     url = f"{NETKEIBA_JRA_BASE}/race/shutuba.html?race_id={race_id}"
     soup = fetch_soup(url, encoding="euc-jp")
     if not soup:
+        return None
+
+    # Validate HTML has race data
+    race_table = soup.select_one("table.RaceTable01, table.Shutuba_Table")
+    horse_rows = soup.select("tr.HorseList")
+    if not race_table and not horse_rows:
+        print(f"  WARN: {race_id} - 出馬表テーブルなし（HTML構造変更？）")
         return None
 
     race_name = ""
@@ -393,6 +456,23 @@ def fetch_jra_entries(race_id):
         except (ValueError, IndexError):
             continue
 
+    # Validate: all arrays must be same length
+    num_horses = len(entries["horses"])
+    if num_horses == 0:
+        return None
+
+    array_keys = ["horse_numbers", "jockeys", "posts", "trainers", "sex_ages", "weights"]
+    for key in array_keys:
+        if len(entries[key]) != num_horses:
+            print(f"  WARN: {race_id} {key} length mismatch (horses={num_horses}, {key}={len(entries[key])})")
+            return None
+
+    # Validate: no empty horse names
+    empty_names = sum(1 for h in entries["horses"] if not h or not str(h).strip())
+    if empty_names > num_horses * 0.3:
+        print(f"  WARN: {race_id} too many empty horse names ({empty_names}/{num_horses})")
+        return None
+
     return {
         "race_id_netkeiba": race_id,
         "race_name": race_name,
@@ -431,6 +511,7 @@ def prefetch_date(date_str, do_nar=True, do_jra=False):
                     "race_id": f"{date_str}-{detail['venue']}-{detail['race_number']}",
                     "race_date": formatted_date,
                     "is_local": True,
+                    "start_time": race.get("start_time", ""),
                     **detail,
                     "created_at": datetime.now().isoformat(),
                 }
@@ -454,6 +535,7 @@ def prefetch_date(date_str, do_nar=True, do_jra=False):
                     "race_id": f"{date_str}-{detail['venue']}-{detail['race_number']}",
                     "race_date": formatted_date,
                     "is_local": False,
+                    "start_time": race.get("start_time", ""),
                     **detail,
                     "created_at": datetime.now().isoformat(),
                 }

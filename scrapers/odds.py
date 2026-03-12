@@ -64,7 +64,7 @@ def fetch_realtime_odds(race_id: str, race_type: str = "jra") -> dict | None:
         if odds_val is None:
             for td in tds:
                 text = td.get_text(strip=True)
-                if re.match(r"^\d+\.\d$", text):
+                if re.match(r"^\d+\.\d+$", text):
                     try:
                         val = float(text)
                         if 1.0 < val < 999.0:

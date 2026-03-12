@@ -1,10 +1,20 @@
 """NAR (local) race scraper - library form adapted from fetch_nar_entries.py."""
 
+import logging
 import re
 from dataclasses import dataclass, field
 from scrapers.base import fetch_with_retry
 from scrapers.jra import RaceSummary, HorseEntry, RaceDetail
+from scrapers.validators import validate_entry, validate_html_has_race_data, validate_race_metadata
 from config import NETKEIBA_NAR_BASE
+
+logger = logging.getLogger(__name__)
+
+# All supported NAR venues (single source of truth)
+NAR_VENUES = [
+    "大井", "川崎", "船橋", "浦和", "園田", "姫路", "名古屋", "笠松",
+    "高知", "佐賀", "水沢", "盛岡", "門別", "帯広", "金沢",
+]
 
 
 def fetch_race_list(date_str: str, venue_filter: str = "") -> list[RaceSummary]:
@@ -21,8 +31,7 @@ def fetch_race_list(date_str: str, venue_filter: str = "") -> list[RaceSummary]:
         header = dl.select_one("p.RaceList_DataHeader, dt")
         if header:
             header_text = header.get_text(strip=True)
-            for v in ["大井", "川崎", "船橋", "浦和", "園田", "姫路", "名古屋", "笠松",
-                       "高知", "佐賀", "水沢", "盛岡", "門別", "帯広"]:
+            for v in NAR_VENUES:
                 if v in header_text:
                     current_venue = v
                     break
@@ -95,10 +104,19 @@ def fetch_race_list(date_str: str, venue_filter: str = "") -> list[RaceSummary]:
 
 
 def fetch_race_entries(race_id: str) -> RaceDetail | None:
-    """Fetch detailed entries for a specific NAR race."""
+    """Fetch detailed entries for a specific NAR race.
+
+    Returns None if page can't be fetched or data is invalid.
+    """
     url = f"{NETKEIBA_NAR_BASE}/race/shutuba.html?race_id={race_id}"
     soup = fetch_with_retry(url, encoding="euc-jp")
     if not soup:
+        return None
+
+    # Validate HTML contains race data
+    html_ok, html_err = validate_html_has_race_data(soup, race_id)
+    if not html_ok:
+        logger.warning(f"NAR HTML validation failed: {html_err}")
         return None
 
     race_name = ""
@@ -108,7 +126,8 @@ def fetch_race_entries(race_id: str) -> RaceDetail | None:
 
     venue = ""
     distance = ""
-    track_condition = "良"
+    # Track condition — use "−" (dash) if not found, NOT "良"
+    track_condition = "−"
 
     race_data1 = soup.select_one(".RaceData01")
     if race_data1:
@@ -116,7 +135,6 @@ def fetch_race_entries(race_id: str) -> RaceDetail | None:
         m = re.search(r'([芝ダ障]\d+m)', text)
         if m:
             distance = m.group(1)
-        # Track condition
         item04 = race_data1.select_one(".Item04")
         if item04:
             cond_text = item04.get_text(strip=True)
@@ -129,8 +147,7 @@ def fetch_race_entries(race_id: str) -> RaceDetail | None:
     if race_data2:
         for span in race_data2.select("span"):
             text = span.get_text(strip=True)
-            for v in ["大井", "川崎", "船橋", "浦和", "園田", "姫路", "名古屋", "笠松",
-                       "高知", "佐賀", "水沢", "盛岡", "門別", "帯広"]:
+            for v in NAR_VENUES:
                 if v in text:
                     venue = v
                     break
@@ -142,6 +159,11 @@ def fetch_race_entries(race_id: str) -> RaceDetail | None:
         except ValueError:
             pass
 
+    # Log metadata warnings
+    meta_warnings = validate_race_metadata(race_name, venue, distance, race_id)
+    for w in meta_warnings:
+        logger.warning(f"NAR metadata: {w}")
+
     summary = RaceSummary(
         race_id=race_id,
         race_number=race_number,
@@ -152,6 +174,7 @@ def fetch_race_entries(race_id: str) -> RaceDetail | None:
     )
 
     entries = []
+    skipped = 0
     for tr in soup.select("table.RaceTable01 tr.HorseList, tr.HorseList"):
         tds = tr.select("td")
         if len(tds) < 8:
@@ -174,6 +197,17 @@ def fetch_race_entries(race_id: str) -> RaceDetail | None:
             trainer_el = tds[7].select_one("a")
             trainer = trainer_el.get_text(strip=True) if trainer_el else tds[7].get_text(strip=True)
 
+            # Validate individual entry
+            entry_warnings = validate_entry(horse_name, horse_number, jockey, post, len(entries))
+            if entry_warnings:
+                if not horse_name.strip() or horse_number <= 0:
+                    for w in entry_warnings:
+                        logger.warning(f"NAR {race_id} skipped: {w}")
+                    skipped += 1
+                    continue
+                for w in entry_warnings:
+                    logger.warning(f"NAR {race_id}: {w}")
+
             entries.append(HorseEntry(
                 horse_number=horse_number,
                 horse_name=horse_name,
@@ -183,8 +217,18 @@ def fetch_race_entries(race_id: str) -> RaceDetail | None:
                 sex_age=sex_age,
                 weight=weight,
             ))
-        except (ValueError, IndexError):
+        except (ValueError, IndexError) as e:
+            logger.warning(f"NAR {race_id}: entry parse error: {e}")
+            skipped += 1
             continue
+
+    if skipped > 0:
+        logger.warning(f"NAR {race_id}: {skipped}頭スキップ, {len(entries)}頭有効")
+
+    # Final validation: must have at least 2 horses
+    if len(entries) < 2:
+        logger.error(f"NAR {race_id}: 出走馬が{len(entries)}頭のみ — データ不正の可能性")
+        return None
 
     summary.headcount = len(entries)
 

@@ -25,6 +25,11 @@ from agent.engine import (
     format_tool_notification, format_tools_used_footer,
     trim_history, extract_memories, HEAVY_TOOLS,
 )
+from agent.response_cache import (
+    detect_query_type, find_race_id,
+    get as get_cached_response, save as save_cached_response,
+    TOOL_QUERY_MAP,
+)
 from config import TELEGRAM_BOT_TOKEN, MAX_TOOL_TURNS, ONBOARDING_TEXT
 from tools.executor import execute_tool
 
@@ -179,6 +184,12 @@ def get_context_buttons(tools_used: list[str]) -> InlineKeyboardMarkup | None:
              InlineKeyboardButton("オッズは？", callback_data="オッズ見せて")],
         ])
 
+    if "get_today_races" in used_set:
+        # After race list — offer to pick a race
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("メインレースを見る", callback_data="メインレースの出馬表見せて")],
+        ])
+
     return None
 
 
@@ -195,6 +206,17 @@ def get_start_buttons() -> InlineKeyboardMarkup:
 # Core message processing (shared by handle_message and handle_callback)
 # ---------------------------------------------------------------------------
 
+async def _send_response(chat_id, text, buttons, context):
+    """Send response, splitting if too long."""
+    if len(text) > 4000:
+        chunks = [text[i:i + 4000] for i in range(0, len(text), 4000)]
+        for i, chunk in enumerate(chunks):
+            markup = buttons if i == len(chunks) - 1 else None
+            await context.bot.send_message(chat_id=chat_id, text=chunk, reply_markup=markup)
+    else:
+        await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=buttons)
+
+
 async def _process_and_reply(
     user_id: int,
     first_name: str,
@@ -208,16 +230,38 @@ async def _process_and_reply(
 
     history = user_conversations.get(user_id, [])
     history = trim_history(history)
+
+    # ── Pre-loop cache check (button case: race_id already in history) ──
+    query_type = detect_query_type(user_text)
+    if query_type:
+        race_id = find_race_id(history)
+        if race_id:
+            cached = get_cached_response(race_id, query_type)
+            if cached:
+                logger.info(f"Pre-loop cache hit: {race_id}:{query_type} user={user_id}")
+                history.append({"role": "user", "content": user_text})
+                history.append({"role": "assistant", "content": cached["text"]})
+                user_conversations[user_id] = history
+
+                full_text = cached["text"]
+                if cached["footer"]:
+                    full_text += "\n\n" + cached["footer"]
+                buttons = get_context_buttons(cached["tools_used"])
+                await _send_response(chat_id, full_text, buttons, context)
+                return
+
     history.append({"role": "user", "content": user_text})
 
     try:
         tools_used = []
         notified_tools = set()
         response = None
-        loop = asyncio.get_event_loop()
+        active_race_id = None
+        cache_used = False
+        ev_loop = asyncio.get_event_loop()
 
         for turn in range(MAX_TOOL_TURNS):
-            response = await loop.run_in_executor(
+            response = await ev_loop.run_in_executor(
                 None, partial(call_claude, history, system)
             )
 
@@ -230,6 +274,28 @@ async def _process_and_reply(
                 history.append({"role": "assistant", "content": response.content})
                 break
 
+            # ── Mid-loop cache check: cacheable tool about to run? ──
+            mid_cache = None
+            for tb in tool_blocks:
+                inp = tb.input if isinstance(tb.input, dict) else {}
+                rid = inp.get("race_id")
+                if rid:
+                    active_race_id = rid
+                qt = TOOL_QUERY_MAP.get(tb.name)
+                if rid and qt:
+                    mid_cache = get_cached_response(rid, qt)
+                    if mid_cache:
+                        break
+
+            if mid_cache:
+                # Cache hit — skip tool execution and remaining API calls
+                logger.info(f"Mid-loop cache hit: {active_race_id} user={user_id}")
+                history.append({"role": "assistant", "content": mid_cache["text"]})
+                tools_used = mid_cache["tools_used"]
+                cache_used = True
+                break
+
+            # Normal flow — append assistant message, execute tools
             history.append({"role": "assistant", "content": response.content})
 
             # Notify user about tools (skip already-notified)
@@ -245,8 +311,11 @@ async def _process_and_reply(
             tool_results = []
             for tool_block in tool_blocks:
                 tools_used.append(tool_block.name)
+                inp = tool_block.input if isinstance(tool_block.input, dict) else {}
+                if inp.get("race_id"):
+                    active_race_id = inp["race_id"]
                 logger.info(f"Executing tool: {tool_block.name}")
-                result = await loop.run_in_executor(
+                result = await ev_loop.run_in_executor(
                     None, partial(execute_tool, tool_block.name, tool_block.input)
                 )
                 tool_results.append({
@@ -258,45 +327,43 @@ async def _process_and_reply(
             history.append({"role": "user", "content": tool_results})
             await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
-        # Extract final text
-        if response:
-            response_text = extract_text(response)
+        # Build final response text
+        if cache_used:
+            response_text = mid_cache["text"]
+            footer = mid_cache["footer"]
         else:
-            response_text = "ごめん、ちょっと調べすぎちゃった。"
+            if response:
+                response_text = extract_text(response)
+            else:
+                response_text = "ごめん、ちょっと調べすぎちゃった。"
+            if not response_text:
+                response_text = "ごめん、うまく答えられなかった。もう一回聞いてもらえる？"
+            footer = format_tools_used_footer(tools_used)
 
-        if not response_text:
-            response_text = "ごめん、うまく答えられなかった。もう一回聞いてもらえる？"
-
-        footer = format_tools_used_footer(tools_used)
-        if footer:
-            response_text = response_text + "\n\n" + footer
-
+        full_text = response_text + ("\n\n" + footer if footer else "")
         user_conversations[user_id] = history
 
-        # Auto-extract memories (best-effort)
-        try:
-            new_memories = await loop.run_in_executor(
-                None, partial(extract_memories, user_text, response_text)
-            )
-            if new_memories:
-                add_memories(user_id, new_memories)
-                logger.info(f"New memories for user {user_id}: {new_memories}")
-        except Exception:
-            pass
+        # ── Post-loop: save to response cache ──
+        if not cache_used and active_race_id:
+            save_qt = detect_query_type(user_text)
+            if save_qt:
+                save_cached_response(active_race_id, save_qt, response_text, footer, tools_used)
 
-        # Contextual buttons
+        # Auto-extract memories (skip if cache was used — no new content)
+        if not cache_used:
+            try:
+                new_memories = await ev_loop.run_in_executor(
+                    None, partial(extract_memories, user_text, response_text)
+                )
+                if new_memories:
+                    add_memories(user_id, new_memories)
+                    logger.info(f"New memories for user {user_id}: {new_memories}")
+            except Exception:
+                pass
+
+        # Contextual buttons + send
         buttons = get_context_buttons(tools_used)
-
-        # Send response (split if too long, attach buttons to last chunk)
-        if len(response_text) > 4000:
-            chunks = [response_text[i:i + 4000] for i in range(0, len(response_text), 4000)]
-            for i, chunk in enumerate(chunks):
-                markup = buttons if i == len(chunks) - 1 else None
-                await context.bot.send_message(chat_id=chat_id, text=chunk, reply_markup=markup)
-        else:
-            await context.bot.send_message(
-                chat_id=chat_id, text=response_text, reply_markup=buttons
-            )
+        await _send_response(chat_id, full_text, buttons, context)
 
     except Exception as e:
         logger.exception(f"Error processing message for user {user_id}")
