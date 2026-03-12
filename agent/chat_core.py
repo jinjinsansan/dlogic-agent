@@ -30,6 +30,53 @@ from tools.executor import execute_tool
 
 logger = logging.getLogger(__name__)
 
+
+def get_web_quick_replies(tools_used: list[str]) -> list[dict]:
+    """Generate context-appropriate quick reply buttons for WebApp (same logic as LINE)."""
+    used_set = set(tools_used)
+    analysis_tools = {"get_race_flow", "get_jockey_analysis", "get_bloodline_analysis", "get_recent_runs", "get_stable_comments"}
+    items = []
+
+    if used_set & analysis_tools:
+        if "get_race_flow" not in used_set:
+            items.append({"label": "🔄 展開予想", "text": "展開は？"})
+        if "get_jockey_analysis" not in used_set:
+            items.append({"label": "🏇 騎手分析", "text": "騎手の成績は？"})
+        if "get_bloodline_analysis" not in used_set:
+            items.append({"label": "🧬 血統分析", "text": "血統は？"})
+        if "get_recent_runs" not in used_set:
+            items.append({"label": "📈 過去走", "text": "過去の成績は？"})
+        if "get_stable_comments" not in used_set:
+            items.append({"label": "🗣️ 関係者情報", "text": "関係者情報は？"})
+        items.append({"label": "💬 どう思う？", "text": "お前はどう思う？"})
+
+    elif "get_predictions" in used_set:
+        items = [
+            {"label": "🔄 展開予想", "text": "展開は？"},
+            {"label": "🏇 騎手分析", "text": "騎手の成績は？"},
+            {"label": "🧬 血統分析", "text": "血統は？"},
+            {"label": "📈 過去走", "text": "過去の成績は？"},
+            {"label": "🗣️ 関係者情報", "text": "関係者情報は？"},
+            {"label": "🔥 全部見る", "text": "全部掘り下げて"},
+            {"label": "💬 どう思う？", "text": "お前はどう思う？"},
+        ]
+
+    elif "get_race_entries" in used_set:
+        items = [
+            {"label": "🎯 予想して", "text": "予想して"},
+            {"label": "📊 予測勝率", "text": "予測勝率見せて"},
+            {"label": "💰 オッズは？", "text": "オッズ見せて"},
+            {"label": "⚖️ 馬体重", "text": "馬体重は？"},
+            {"label": "🗣️ 関係者情報", "text": "関係者情報は？"},
+        ]
+
+    elif "get_today_races" in used_set:
+        items = [
+            {"label": "🏇 メインレース", "text": "メインレースの出馬表見せて"},
+        ]
+
+    return items
+
 # Tools that should skip memory extraction
 _MEMORY_SKIP_TOOLS = {
     "get_today_races", "get_race_entries", "get_predictions",
@@ -57,13 +104,19 @@ def run_agent(
     Yields dicts with "type" key. Final yield is always {"type": "done", ...}.
     """
     profile_id = profile["id"]
+    is_web_session = profile.get("web_session", False)
 
     # Build user context
-    memories = db_get_memories(profile_id)
-    user_context = db_build_user_context(profile, memories)
+    if is_web_session:
+        # Web sessions: no Supabase DB, use minimal context
+        memories = []
+        user_context = "【Webチャットユーザー】\n名前: ゲスト"
+    else:
+        memories = db_get_memories(profile_id)
+        user_context = db_build_user_context(profile, memories)
 
-    # Inject honmei status if available
-    if active_race_id_hint:
+    # Inject honmei status if available (LINE only)
+    if active_race_id_hint and not is_web_session:
         existing_pick = db_check_prediction(profile_id, active_race_id_hint)
         if existing_pick:
             user_context += (
@@ -101,6 +154,7 @@ def run_agent(
                 "active_race_id": result.get("active_race_id"),
                 "history": history,
                 "cache_used": False,
+                "quick_replies": get_web_quick_replies(result["tools_used"]),
             }
             return
         else:
@@ -130,6 +184,7 @@ def run_agent(
                     "active_race_id": race_id,
                     "history": history,
                     "cache_used": True,
+                    "quick_replies": get_web_quick_replies(cached["tools_used"]),
                 }
                 return
 
@@ -218,8 +273,8 @@ def run_agent(
         if save_qt:
             save_cached_response(active_race_id, save_qt, response_text, footer, tools_used)
 
-    # Auto-extract memories
-    skip_memory = cache_used or bool(set(tools_used) & _MEMORY_SKIP_TOOLS)
+    # Auto-extract memories (skip for web sessions — no DB)
+    skip_memory = is_web_session or cache_used or bool(set(tools_used) & _MEMORY_SKIP_TOOLS)
     if not skip_memory:
         try:
             new_memories = extract_memories(user_message, response_text)
@@ -238,4 +293,5 @@ def run_agent(
         "active_race_id": active_race_id,
         "history": history,
         "cache_used": cache_used,
+        "quick_replies": get_web_quick_replies(tools_used),
     }

@@ -21,6 +21,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 flask_app = Flask(__name__)
+flask_app.url_map.strict_slashes = False
 
 # CORS for WebApp chat (allow frontend origin)
 CORS(flask_app, resources={

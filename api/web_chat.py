@@ -127,7 +127,12 @@ def chat():
                         session["active_race_id"] = chunk["active_race_id"]
 
                     yield f"data: {json.dumps({'type': 'text', 'content': chunk['text']}, ensure_ascii=False)}\n\n"
-                    yield f"data: {json.dumps({'type': 'done', 'session_id': session_id}, ensure_ascii=False)}\n\n"
+                    done_data = {
+                        'type': 'done',
+                        'session_id': session_id,
+                        'quick_replies': chunk.get('quick_replies', []),
+                    }
+                    yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
 
         except Exception as e:
             logger.exception(f"WebChat error for session {session_id[:16]}")
