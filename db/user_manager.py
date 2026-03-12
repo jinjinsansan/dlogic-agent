@@ -255,6 +255,127 @@ def log_prediction(profile_id: str, race_id: str, race_name: str = "", venue: st
 # Build system prompt context
 # ---------------------------------------------------------------------------
 
+
+# ---------------------------------------------------------------------------
+# Maintenance & Waitlist management
+# ---------------------------------------------------------------------------
+
+def get_bot_config(key: str) -> dict:
+    """Get a bot_config value by key. Returns empty dict if not found."""
+    sb = get_client()
+    try:
+        res = sb.table("bot_config") \
+            .select("value") \
+            .eq("key", key) \
+            .limit(1) \
+            .execute()
+        if res.data:
+            return res.data[0]["value"]
+    except Exception:
+        logger.exception(f"Failed to get bot_config: {key}")
+    return {}
+
+
+def set_bot_config(key: str, value: dict) -> None:
+    """Upsert a bot_config value."""
+    sb = get_client()
+    sb.table("bot_config") \
+        .upsert({"key": key, "value": value, "updated_at": datetime.now(timezone.utc).isoformat()}) \
+        .execute()
+
+
+def is_maintenance_mode() -> bool:
+    """Check if maintenance mode is enabled."""
+    config = get_bot_config("maintenance")
+    return config.get("enabled", False)
+
+
+def get_maintenance_message() -> str:
+    """Get the maintenance message."""
+    config = get_bot_config("maintenance")
+    return config.get("message", "ただいまメンテナンス中です。しばらくお待ちください。")
+
+
+def set_maintenance(enabled: bool, message: str = None) -> None:
+    """Toggle maintenance mode."""
+    config = get_bot_config("maintenance")
+    config["enabled"] = enabled
+    if message:
+        config["message"] = message
+    set_bot_config("maintenance", config)
+
+
+def get_user_status(profile_id: str) -> str:
+    """Get user's status (active/waitlist/suspended)."""
+    sb = get_client()
+    res = sb.table("user_profiles") \
+        .select("status") \
+        .eq("id", profile_id) \
+        .limit(1) \
+        .execute()
+    if res.data:
+        return res.data[0].get("status") or "active"
+    return "active"
+
+
+def set_user_status(profile_id: str, status: str) -> None:
+    """Set user's status."""
+    sb = get_client()
+    sb.table("user_profiles") \
+        .update({"status": status}) \
+        .eq("id", profile_id) \
+        .execute()
+
+
+def activate_users(count: int) -> list[dict]:
+    """Activate `count` waitlisted users (oldest first). Returns activated profiles."""
+    sb = get_client()
+    res = sb.table("user_profiles") \
+        .select("id, display_name, line_user_id") \
+        .eq("status", "waitlist") \
+        .order("first_seen_at", desc=False) \
+        .limit(count) \
+        .execute()
+
+    activated = []
+    for profile in res.data:
+        sb.table("user_profiles") \
+            .update({"status": "active"}) \
+            .eq("id", profile["id"]) \
+            .execute()
+        activated.append(profile)
+    return activated
+
+
+def get_waitlist_count() -> int:
+    """Get number of users in waitlist."""
+    sb = get_client()
+    res = sb.table("user_profiles") \
+        .select("id", count="exact") \
+        .eq("status", "waitlist") \
+        .execute()
+    return res.count or 0
+
+
+def get_active_count() -> int:
+    """Get number of active users."""
+    sb = get_client()
+    res = sb.table("user_profiles") \
+        .select("id", count="exact") \
+        .eq("status", "active") \
+        .execute()
+    return res.count or 0
+
+
+def get_total_user_count() -> int:
+    """Get total number of users."""
+    sb = get_client()
+    res = sb.table("user_profiles") \
+        .select("id", count="exact") \
+        .execute()
+    return res.count or 0
+
+
 def build_user_context(profile: dict, memories: list[dict]) -> str:
     """Build user context string for the system prompt from Supabase data."""
     lines = []

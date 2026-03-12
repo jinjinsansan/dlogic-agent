@@ -32,6 +32,14 @@ from agent.response_cache import (
 )
 from config import TELEGRAM_BOT_TOKEN, MAX_TOOL_TURNS, ONBOARDING_TEXT
 from tools.executor import execute_tool
+from db.user_manager import (
+    is_maintenance_mode, set_maintenance, get_maintenance_message,
+    activate_users, get_waitlist_count, get_active_count, get_total_user_count,
+)
+from db.supabase_client import get_client as get_supabase
+
+# Admin chat ID (jin)
+ADMIN_CHAT_ID = 197618639
 
 logger = logging.getLogger(__name__)
 
@@ -449,6 +457,246 @@ async def forget_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 # ---------------------------------------------------------------------------
+# Admin commands (Telegram only — for managing LINE Bot)
+# ---------------------------------------------------------------------------
+
+def _is_admin(update: Update) -> bool:
+    return update.effective_user.id == ADMIN_CHAT_ID
+
+
+async def maintenance_on_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Toggle maintenance ON. Usage: /maintenance_on [message]"""
+    if not _is_admin(update):
+        await update.message.reply_text("⛔ 管理者のみ使用可能です。")
+        return
+    custom_msg = " ".join(context.args) if context.args else None
+    set_maintenance(True, custom_msg)
+    msg = get_maintenance_message()
+    await update.message.reply_text(
+        f"🔧 メンテナンスモード ON\n\n"
+        f"LINE Botへの全メッセージがブロックされます。\n"
+        f"表示メッセージ: {msg}\n\n"
+        f"/maintenance_off で解除"
+    )
+
+
+async def maintenance_off_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Toggle maintenance OFF."""
+    if not _is_admin(update):
+        await update.message.reply_text("⛔ 管理者のみ使用可能です。")
+        return
+    set_maintenance(False)
+    await update.message.reply_text("✅ メンテナンスモード OFF\nLINE Bot通常稼働に復帰しました。")
+
+
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show bot status: maintenance, user counts."""
+    if not _is_admin(update):
+        await update.message.reply_text("⛔ 管理者のみ使用可能です。")
+        return
+    maint = is_maintenance_mode()
+    total = get_total_user_count()
+    active = get_active_count()
+    waitlist = get_waitlist_count()
+    await update.message.reply_text(
+        f"📊 LINE Bot ステータス\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"メンテナンス: {'🔧 ON' if maint else '✅ OFF'}\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"総ユーザー数: {total}\n"
+        f"アクティブ: {active}\n"
+        f"ウェイトリスト: {waitlist}\n"
+        f"━━━━━━━━━━━━━━━\n\n"
+        f"コマンド一覧:\n"
+        f"/maintenance_on [msg] - メンテON\n"
+        f"/maintenance_off - メンテOFF\n"
+        f"/activate [数] - ウェイトリスト解除\n"
+        f"/activate_all - 全員アクティベート"
+    )
+
+
+async def activate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Activate N users from waitlist. Usage: /activate 10"""
+    if not _is_admin(update):
+        await update.message.reply_text("⛔ 管理者のみ使用可能です。")
+        return
+
+    count = 10  # default
+    if context.args:
+        try:
+            count = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("数値を指定してください: /activate 10")
+            return
+
+    activated = activate_users(count)
+    if not activated:
+        await update.message.reply_text("ウェイトリストに待機ユーザーがいません。")
+        return
+
+    names = "\n".join([f"  • {u['display_name']}" for u in activated])
+    remaining = get_waitlist_count()
+    await update.message.reply_text(
+        f"✅ {len(activated)}人をアクティベートしました！\n\n"
+        f"{names}\n\n"
+        f"残りウェイトリスト: {remaining}人"
+    )
+
+    # Send activation notification to each user via LINE
+    for user in activated:
+        try:
+            from bot.line_handlers import _push, get_start_quick_reply
+            from config import ONBOARDING_TEXT
+            _push(
+                user["line_user_id"],
+                "よう、待たせたな！🔥\n\n"
+                "お前の順番が来たぜ。今日から俺と一緒に勝ちにいこう！\n\n"
+                + ONBOARDING_TEXT,
+                quick_reply=get_start_quick_reply(),
+            )
+        except Exception:
+            logger.warning(f"Failed to notify activated user: {user['display_name']}")
+
+
+async def inquiries_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """List open inquiries."""
+    if not _is_admin(update):
+        await update.message.reply_text("⛔ 管理者のみ使用可能です。")
+        return
+
+    sb = get_supabase()
+    res = sb.table("inquiries") \
+        .select("id, display_name, content, created_at") \
+        .eq("status", "open") \
+        .order("created_at", desc=False) \
+        .limit(20) \
+        .execute()
+
+    if not res.data:
+        await update.message.reply_text("✅ 未対応の問い合わせはありません。")
+        return
+
+    text = f"📩 未対応の問い合わせ ({len(res.data)}件)\n━━━━━━━━━━━━━━━\n\n"
+    for item in res.data:
+        created = item["created_at"][:16].replace("T", " ")
+        content = item["content"][:50]
+        text += f"#{item['id']} {item['display_name']}\n"
+        text += f"  {content}\n"
+        text += f"  {created}\n\n"
+    text += "対応完了: /resolve <ID>"
+    await update.message.reply_text(text)
+
+
+async def resolve_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Resolve an inquiry and notify user. Usage: /resolve <id> [message]"""
+    if not _is_admin(update):
+        await update.message.reply_text("⛔ 管理者のみ使用可能です。")
+        return
+
+    if not context.args:
+        await update.message.reply_text("使い方: /resolve <ID> [メッセージ]")
+        return
+
+    try:
+        inquiry_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("IDは数値で指定してください。")
+        return
+
+    admin_note = " ".join(context.args[1:]) if len(context.args) > 1 else ""
+
+    # Get inquiry from Supabase
+    sb = get_supabase()
+    res = sb.table("inquiries") \
+        .select("*") \
+        .eq("id", inquiry_id) \
+        .limit(1) \
+        .execute()
+
+    if not res.data:
+        await update.message.reply_text(f"ID #{inquiry_id} の問い合わせが見つかりません。")
+        return
+
+    inquiry = res.data[0]
+    if inquiry["status"] == "resolved":
+        await update.message.reply_text(f"#{inquiry_id} は既に対応済みです。")
+        return
+
+    # Update status
+    from datetime import datetime, timezone
+    sb.table("inquiries") \
+        .update({
+            "status": "resolved",
+            "admin_note": admin_note,
+            "resolved_at": datetime.now(timezone.utc).isoformat(),
+        }) \
+        .eq("id", inquiry_id) \
+        .execute()
+
+    # Notify user via LINE push
+    line_user_id = inquiry.get("line_user_id")
+    user_name = inquiry.get("display_name", "")
+    notified = False
+    if line_user_id:
+        try:
+            from bot.line_handlers import _push, get_start_quick_reply
+            msg = (
+                f"よう{user_name}！\n\n"
+                "お前が運営に送ってくれた問い合わせだけど、運営がすぐ対応してくれたぜ！👊\n"
+            )
+            if admin_note:
+                msg += f"\n📝 {admin_note}\n"
+            msg += "\nまた何かあったらいつでも言ってくれ！"
+            _push(line_user_id, msg, quick_reply=get_start_quick_reply())
+            notified = True
+        except Exception:
+            logger.warning(f"Failed to notify user for inquiry #{inquiry_id}")
+
+    await update.message.reply_text(
+        f"✅ #{inquiry_id} を対応済みにしました。\n"
+        f"ユーザー: {user_name}\n"
+        f"LINE通知: {'送信済み' if notified else '失敗'}"
+    )
+
+
+async def activate_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Activate ALL waitlisted users."""
+    if not _is_admin(update):
+        await update.message.reply_text("⛔ 管理者のみ使用可能です。")
+        return
+
+    waitlist = get_waitlist_count()
+    if waitlist == 0:
+        await update.message.reply_text("ウェイトリストに待機ユーザーがいません。")
+        return
+
+    activated = activate_users(waitlist)
+    await update.message.reply_text(
+        f"✅ 全 {len(activated)}人をアクティベートしました！\n\n"
+        f"LINE通知を送信中..."
+    )
+
+    # Send activation notifications
+    success = 0
+    for user in activated:
+        try:
+            from bot.line_handlers import _push, get_start_quick_reply
+            from config import ONBOARDING_TEXT
+            _push(
+                user["line_user_id"],
+                "よう、待たせたな！🔥\n\n"
+                "お前の順番が来たぜ。今日から俺と一緒に勝ちにいこう！\n\n"
+                + ONBOARDING_TEXT,
+                quick_reply=get_start_quick_reply(),
+            )
+            success += 1
+        except Exception:
+            logger.warning(f"Failed to notify activated user: {user['display_name']}")
+
+    await update.message.reply_text(f"📨 LINE通知完了: {success}/{len(activated)}人に送信")
+
+
+# ---------------------------------------------------------------------------
 # Message & callback handlers
 # ---------------------------------------------------------------------------
 
@@ -518,6 +766,13 @@ async def post_init(app: Application) -> None:
         BotCommand("reset", "会話をリセット"),
         BotCommand("memory", "覚えていることを確認"),
         BotCommand("forget", "記憶をリセット"),
+        BotCommand("status", "LINE Botステータス確認"),
+        BotCommand("maintenance_on", "メンテナンスON"),
+        BotCommand("maintenance_off", "メンテナンスOFF"),
+        BotCommand("activate", "ウェイトリスト解除"),
+        BotCommand("activate_all", "全員アクティベート"),
+        BotCommand("inquiries", "未対応の問い合わせ一覧"),
+        BotCommand("resolve", "問い合わせ対応完了"),
     ])
 
 
@@ -532,6 +787,15 @@ def create_app() -> Application:
     app.add_handler(CommandHandler("reset", reset_command))
     app.add_handler(CommandHandler("memory", memory_command))
     app.add_handler(CommandHandler("forget", forget_command))
+
+    # Admin commands (LINE Bot management from Telegram)
+    app.add_handler(CommandHandler("maintenance_on", maintenance_on_command))
+    app.add_handler(CommandHandler("maintenance_off", maintenance_off_command))
+    app.add_handler(CommandHandler("status", status_command))
+    app.add_handler(CommandHandler("activate", activate_command))
+    app.add_handler(CommandHandler("activate_all", activate_all_command))
+    app.add_handler(CommandHandler("inquiries", inquiries_command))
+    app.add_handler(CommandHandler("resolve", resolve_command))
 
     # Inline button callback handler
     app.add_handler(CallbackQueryHandler(handle_callback))

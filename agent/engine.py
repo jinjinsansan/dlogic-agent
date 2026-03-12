@@ -44,7 +44,10 @@ TOOL_LABELS = {
     "get_prediction_ranking": "ランキング取得",
     "get_odds_probability": "予測勝率算出",
     "get_stable_comments": "関係者情報取得",
+    "get_horse_weights": "馬体重取得",
+    "get_training_comments": "調教情報取得",
     "get_engine_stats": "エンジン的中率確認",
+    "send_inquiry": "問い合わせ送信",
 }
 
 # Tools that involve heavy engine computation (notify user about wait time)
@@ -115,7 +118,7 @@ def format_tool_notification(tool_names: list[str]) -> str:
 
 _UTILITY_TOOLS = {
     "get_my_stats", "get_prediction_ranking", "record_user_prediction",
-    "check_user_prediction", "get_engine_stats",
+    "check_user_prediction", "get_engine_stats", "send_inquiry",
 }
 
 

@@ -10,7 +10,7 @@ from datetime import datetime
 
 import requests
 
-from config import DLOGIC_API_URL
+from config import DLOGIC_API_URL, TELEGRAM_BOT_TOKEN, ADMIN_TELEGRAM_CHAT_ID
 from scrapers import jra, nar, archive
 from scrapers.odds import fetch_realtime_odds
 from scrapers.horse_weight import fetch_horse_weights
@@ -158,6 +158,8 @@ def execute_tool(tool_name: str, tool_input: dict, context: dict | None = None) 
             return _get_stable_comments(tool_input)
         elif tool_name == "get_engine_stats":
             return _get_engine_stats(tool_input)
+        elif tool_name == "send_inquiry":
+            return _send_inquiry(tool_input, context)
         else:
             return json.dumps({"error": f"Unknown tool: {tool_name}"}, ensure_ascii=False)
     except Exception as e:
@@ -652,7 +654,7 @@ def _get_horse_weights(params: dict) -> str:
         return json.dumps({
             "race_id": race_id,
             "horse_weights": {},
-            "note": "馬体重が未発表です（レース当日の朝〜昼に発表されます）",
+            "note": "馬体重はまだ発表されてないぜ。だいたい発走30分前くらいに公開されるから、その頃また聞いてくれ！",
         }, ensure_ascii=False)
 
     return json.dumps({
@@ -1191,3 +1193,91 @@ def _get_odds_probability(params: dict) -> str:
         logger.info(f"Cached odds probability for {race_id}")
 
     return json.dumps(result_data, ensure_ascii=False)
+
+
+def _send_inquiry(params: dict, context: dict | None = None) -> str:
+    """Send user inquiry to admin via Telegram and save to Supabase."""
+    from datetime import timezone, timedelta
+    from db.supabase_client import get_client
+    jst = timezone(timedelta(hours=9))
+
+    category = params.get("category", "other")
+    summary = params.get("summary", "")
+    detail = params.get("detail", "")
+
+    category_labels = {
+        "bug": "🐛 不具合報告",
+        "request": "💡 要望",
+        "question": "❓ 質問",
+        "other": "📩 その他",
+    }
+    label = category_labels.get(category, "📩 問い合わせ")
+
+    # Get user info from context
+    user_name = "不明"
+    user_profile_id = None
+    line_user_id = ""
+    if context and context.get("user_profile_id"):
+        user_profile_id = context["user_profile_id"]
+        try:
+            sb = get_client()
+            r = sb.table("user_profiles").select("display_name, line_user_id").eq(
+                "id", user_profile_id
+            ).limit(1).execute()
+            if r.data:
+                user_name = r.data[0].get("display_name", "不明")
+                line_user_id = r.data[0].get("line_user_id", "")
+        except Exception:
+            pass
+
+    content = summary
+    if detail:
+        content += f"\n{detail}"
+
+    # Save to Supabase
+    inquiry_id = None
+    try:
+        sb = get_client()
+        row = {
+            "user_profile_id": user_profile_id,
+            "line_user_id": line_user_id,
+            "display_name": user_name,
+            "content": content,
+            "status": "open",
+        }
+        res = sb.table("inquiries").insert(row).execute()
+        if res.data:
+            inquiry_id = res.data[0]["id"]
+    except Exception:
+        logger.exception("Failed to save inquiry to Supabase")
+
+    now = datetime.now(jst).strftime("%Y-%m-%d %H:%M")
+    text = (
+        f"{label}\n"
+        f"━━━━━━━━━━━━\n"
+    )
+    if inquiry_id:
+        text += f"ID: #{inquiry_id}\n"
+    text += (
+        f"ユーザー: {user_name}\n"
+        f"内容: {content}\n"
+        f"時刻: {now} JST\n\n"
+        f"/resolve {inquiry_id} で対応完了通知"
+    )
+
+    # Send via Telegram Bot API
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        resp = requests.post(url, json={
+            "chat_id": ADMIN_TELEGRAM_CHAT_ID,
+            "text": text,
+        }, timeout=10)
+        if resp.status_code == 200:
+            logger.info(f"Inquiry #{inquiry_id} sent to admin: {category} - {summary}")
+            return json.dumps({"status": "sent", "message": "問い合わせを運営に送信しました。"}, ensure_ascii=False)
+        else:
+            logger.error(f"Telegram send failed: {resp.status_code} {resp.text}")
+            return json.dumps({"status": "error", "message": "送信に失敗しました。時間をおいて再度お試しください。"}, ensure_ascii=False)
+    except Exception as e:
+        logger.exception("Failed to send inquiry via Telegram")
+        return json.dumps({"status": "error", "message": "送信に失敗しました。"}, ensure_ascii=False)

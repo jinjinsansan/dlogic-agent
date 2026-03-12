@@ -1,10 +1,8 @@
 """LINE Bot handlers with agentic loop, tool notifications, and quick reply buttons."""
 
 import logging
-import os
 import re
 from datetime import datetime, timezone, timedelta
-from functools import partial
 
 from linebot.v3 import WebhookHandler
 from linebot.v3.messaging import (
@@ -13,8 +11,6 @@ from linebot.v3.messaging import (
     MessagingApi,
     ReplyMessageRequest,
     TextMessage,
-    FlexMessage,
-    FlexBubble,
     PushMessageRequest,
     QuickReply,
     QuickReplyItem,
@@ -42,6 +38,9 @@ from db.user_manager import (
     build_user_context as db_build_user_context,
     get_transfer_code as db_get_transfer_code,
     transfer_account as db_transfer_account,
+    is_maintenance_mode,
+    get_maintenance_message,
+    get_user_status,
 )
 from db.prediction_manager import (
     record_prediction as db_record_prediction,
@@ -114,7 +113,7 @@ _RACE_CHANGE_KEYWORDS = [
 
 # Keywords that are about the SAME race (allowed even with pending honmei)
 _SAME_RACE_KEYWORDS = [
-    "予想して", "オッズ", "馬体重", "調教", "展開", "騎手", "血統", "過去", "直近",
+    "予想して", "オッズ", "馬体重", "関係者", "展開", "騎手", "血統", "過去", "直近",
     "どう思う", "全部", "掘り下げ",
 ]
 
@@ -154,7 +153,7 @@ def _has_pending_honmei(user_id: str, profile_id: str) -> bool:
 def get_quick_reply(tools_used: list[str]) -> QuickReply | None:
     """Get context-appropriate quick reply buttons based on tools used."""
     used_set = set(tools_used)
-    analysis_tools = {"get_race_flow", "get_jockey_analysis", "get_bloodline_analysis", "get_recent_runs", "get_training_comments", "get_stable_comments"}
+    analysis_tools = {"get_race_flow", "get_jockey_analysis", "get_bloodline_analysis", "get_recent_runs", "get_stable_comments"}
 
     items = []
 
@@ -168,8 +167,6 @@ def get_quick_reply(tools_used: list[str]) -> QuickReply | None:
             items.append(QuickReplyItem(action=MessageAction(label="🧬 血統分析", text="血統は？")))
         if "get_recent_runs" not in used_set:
             items.append(QuickReplyItem(action=MessageAction(label="📈 過去走", text="過去の成績は？")))
-        if "get_training_comments" not in used_set:
-            items.append(QuickReplyItem(action=MessageAction(label="💪 調教", text="調教どう？")))
         if "get_stable_comments" not in used_set:
             items.append(QuickReplyItem(action=MessageAction(label="🗣️ 関係者情報", text="関係者情報は？")))
         items.append(QuickReplyItem(action=MessageAction(label="💬 どう思う？", text="お前はどう思う？")))
@@ -181,7 +178,6 @@ def get_quick_reply(tools_used: list[str]) -> QuickReply | None:
             QuickReplyItem(action=MessageAction(label="🏇 騎手分析", text="騎手の成績は？")),
             QuickReplyItem(action=MessageAction(label="🧬 血統分析", text="血統は？")),
             QuickReplyItem(action=MessageAction(label="📈 過去走", text="過去の成績は？")),
-            QuickReplyItem(action=MessageAction(label="💪 調教", text="調教どう？")),
             QuickReplyItem(action=MessageAction(label="🗣️ 関係者情報", text="関係者情報は？")),
             QuickReplyItem(action=MessageAction(label="🔥 全部見る", text="全部掘り下げて")),
             QuickReplyItem(action=MessageAction(label="💬 どう思う？", text="お前はどう思う？")),
@@ -194,7 +190,7 @@ def get_quick_reply(tools_used: list[str]) -> QuickReply | None:
             QuickReplyItem(action=MessageAction(label="📊 予測勝率", text="予測勝率見せて")),
             QuickReplyItem(action=MessageAction(label="💰 オッズは？", text="オッズ見せて")),
             QuickReplyItem(action=MessageAction(label="⚖️ 馬体重", text="馬体重は？")),
-            QuickReplyItem(action=MessageAction(label="💪 調教", text="調教どう？")),
+            QuickReplyItem(action=MessageAction(label="🗣️ 関係者情報", text="関係者情報は？")),
         ]
 
     elif "get_today_races" in used_set:
@@ -246,15 +242,8 @@ def get_start_quick_reply() -> QuickReply:
         QuickReplyItem(action=MessageAction(label="📊 俺の成績", text="俺の成績は？")),
         QuickReplyItem(action=MessageAction(label="🏆 ランキング", text="ランキング見せて")),
         QuickReplyItem(action=MessageAction(label="❓ ディーロジって？", text="ディーロジって？")),
+        QuickReplyItem(action=MessageAction(label="📩 問い合わせ", text="問い合わせしたい")),
     ])
-
-
-# ---------------------------------------------------------------------------
-# Flex Message styled buttons (matching Rich Menu design)
-# ---------------------------------------------------------------------------
-
-# Design constants matching Rich Menu
-
 
 
 
@@ -274,8 +263,8 @@ def _get_display_name(user_id: str) -> str:
         return "ゲスト"
 
 
-def _reply(reply_token: str, text: str, quick_reply: QuickReply = None, flex: FlexMessage = None):
-    """Send a reply message with optional quick reply / flex buttons."""
+def _reply(reply_token: str, text: str, quick_reply: QuickReply = None):
+    """Send a reply message with optional quick reply."""
     with ApiClient(configuration) as api_client:
         api = MessagingApi(api_client)
         messages = []
@@ -283,18 +272,14 @@ def _reply(reply_token: str, text: str, quick_reply: QuickReply = None, flex: Fl
             chunks = [text[i:i+4500] for i in range(0, len(text), 4500)]
             for i, chunk in enumerate(chunks):
                 msg = TextMessage(text=chunk)
-                if quick_reply and i == len(chunks) - 1 and not flex:
+                if quick_reply and i == len(chunks) - 1:
                     msg.quick_reply = quick_reply
                 messages.append(msg)
         else:
             msg = TextMessage(text=text)
-            if quick_reply and not flex:
+            if quick_reply:
                 msg.quick_reply = quick_reply
             messages.append(msg)
-
-        # Append Flex Message buttons after text
-        if flex:
-            messages.append(flex)
 
         api.reply_message(
             ReplyMessageRequest(
@@ -304,8 +289,8 @@ def _reply(reply_token: str, text: str, quick_reply: QuickReply = None, flex: Fl
         )
 
 
-def _push(user_id: str, text: str, quick_reply: QuickReply = None, flex: FlexMessage = None):
-    """Send a push message with optional quick reply / flex buttons."""
+def _push(user_id: str, text: str, quick_reply: QuickReply = None):
+    """Send a push message with optional quick reply."""
     with ApiClient(configuration) as api_client:
         api = MessagingApi(api_client)
         messages = []
@@ -317,11 +302,7 @@ def _push(user_id: str, text: str, quick_reply: QuickReply = None, flex: FlexMes
         else:
             messages.append(TextMessage(text=text))
 
-        # Append Flex Message buttons after text
-        if flex:
-            messages.append(flex)
-        elif quick_reply:
-            # Fallback: attach quick_reply to last text message
+        if quick_reply:
             messages[-1].quick_reply = quick_reply
 
         api.push_message(
@@ -396,10 +377,23 @@ def _get_profile(user_id: str, display_name: str) -> dict:
 
 @handler.add(FollowEvent)
 def handle_follow(event: FollowEvent):
-    """Handle when user adds/follows the bot — send onboarding."""
+    """Handle when user adds/follows the bot — register as waitlist."""
     user_id = event.source.user_id
     display_name = _get_display_name(user_id)
-    _get_profile(user_id, display_name)
+    profile = _get_profile(user_id, display_name)
+
+    # Check user status — new users default to 'waitlist'
+    status = get_user_status(profile["id"])
+    if status == "waitlist":
+        _reply(
+            event.reply_token,
+            f"よう、{display_name}！はじめまして！\n\n"
+            "俺はディーロジ。お前の競馬の相棒だ。\n\n"
+            "ありがてえ、登録してくれたんだな！\n"
+            "ただ今めちゃくちゃ人が集まっててよ、順番に案内してるところなんだ。\n\n"
+            "お前の番が来たらすぐ連絡するから、もうちょい待っててくれ！💪",
+        )
+        return
 
     _reply(
         event.reply_token,
@@ -418,6 +412,32 @@ def handle_message(event: MessageEvent):
     display_name = _get_display_name(user_id)
 
     if not user_text:
+        return
+
+    # ── Gate 1: Emergency maintenance check ($0 — no Claude API call) ──
+    if is_maintenance_mode():
+        msg = get_maintenance_message()
+        _reply(event.reply_token, f"🔧 {msg}")
+        return
+
+    # ── Gate 2: User status check (waitlist / suspended) ──
+    profile = _get_profile(user_id, display_name)
+    status = get_user_status(profile["id"])
+    if status == "waitlist":
+        _reply(
+            event.reply_token,
+            "おっと、すまねえ！\n\n"
+            "今めちゃくちゃ登録が殺到しててよ、順番に案内してるんだ。\n"
+            "お前の番が来たらすぐ連絡するから、もうちょい待っててくれ！💪",
+        )
+        return
+    if status == "suspended":
+        _reply(
+            event.reply_token,
+            "悪いな、お前のアカウントは今ちょっと止まってるんだ。\n"
+            "何かあったらここから連絡してくれ👇\n"
+            "https://lin.ee/73wrNkv",
+        )
         return
 
     # Handle honmei (本命) selection — intercept before agentic loop
@@ -470,16 +490,8 @@ def handle_message(event: MessageEvent):
 
     # NOTE: 引き継ぎコード機能は保留中（コードはDB生成済みだが会話には出さない）
 
-    # ── Daily greeting (1 day, 1 time only) ──
-    profile = _get_profile(user_id, display_name)
-    if _should_daily_greet(user_id, profile):
-        greeting = (
-            f"よう、{display_name}！今日も来てくれたな。\n\n"
-            f"🌐 たまにはDlogicサイトも見てやってくれ\n"
-            f"https://www.dlogicai.in/\n\n"
-            f"さて、今日は何する？"
-        )
-        _push(user_id, greeting, quick_reply=get_start_quick_reply())
+    # ── Daily greeting disabled to save push message quota ──
+    # _should_daily_greet(user_id, profile) — skipped
 
     # ── Honmei blocking: if user has pending pick and tries to change race ──
     if _has_pending_honmei(user_id, profile["id"]):
@@ -541,9 +553,8 @@ def handle_message(event: MessageEvent):
             if result.get("footer"):
                 full_text += "\n\n" + result["footer"]
             qr = get_quick_reply(result["tools_used"])
-            _push(user_id, full_text, quick_reply=qr)
 
-            # Handle honmei for predictions/entries
+            # Integrate honmei into same message to save push quota
             active_race_id = result.get("active_race_id")
             if active_race_id and set(result["tools_used"]) & {"get_predictions", "get_race_entries"}:
                 already_picked = db_check_prediction(profile["id"], active_race_id)
@@ -551,16 +562,15 @@ def handle_message(event: MessageEvent):
                     _user_active_race[user_id] = active_race_id
                     honmei_qr = get_honmei_quick_reply(active_race_id)
                     if honmei_qr:
-                        _push(
-                            user_id,
-                            "━━━━━━━━━━━━━━━\n"
+                        full_text += (
+                            "\n\n━━━━━━━━━━━━━━━\n"
                             "📢 みんなの予想\n"
                             "━━━━━━━━━━━━━━━\n\n"
-                            "お前の本命を教えてくれ！\n"
-                            "みんなの予想を集計して、的中率・回収率を記録していくぜ。\n\n"
-                            "👇 本命をタップ！",
-                            quick_reply=honmei_qr,
+                            "お前の本命を教えてくれ！👇"
                         )
+                        qr = honmei_qr
+
+            _push(user_id, full_text, quick_reply=qr)
             return
         else:
             # Route matched but couldn't handle (e.g., no race_id) — fall through
@@ -634,13 +644,8 @@ def handle_message(event: MessageEvent):
 
             history.append({"role": "assistant", "content": response.content})
 
-            # Notify user (skip already-notified tools)
-            new_tool_names = [tb.name for tb in tool_blocks if tb.name not in notified_tools]
-            if new_tool_names:
-                notification = format_tool_notification(new_tool_names)
-                _push(user_id, notification)
-                for name in new_tool_names:
-                    notified_tools.add(name)
+            # Tool notifications disabled to save push message quota
+            # (user sees "考え中..." reply instead)
 
             # Execute tools
             tool_context = {"user_profile_id": profile["id"]}
@@ -701,29 +706,25 @@ def handle_message(event: MessageEvent):
             except Exception:
                 pass
 
-        # Push final response with contextual quick reply buttons
+        # Push final response — integrate honmei into same message to save push quota
         qr = get_quick_reply(tools_used)
-        _push(user_id, full_text, quick_reply=qr)
-
-        # ── Post-loop: 「みんなの予想」を独立メッセージとして送信 ──
         used_set = set(tools_used)
+
         if used_set & {"get_race_entries", "get_predictions"} and active_race_id:
             already_picked = db_check_prediction(profile["id"], active_race_id)
             if not already_picked:
                 _user_active_race[user_id] = active_race_id
-                # Send honmei request as a separate message with buttons
                 honmei_qr = get_honmei_quick_reply(active_race_id)
                 if honmei_qr:
-                    _push(
-                        user_id,
-                        "━━━━━━━━━━━━━━━\n"
+                    full_text += (
+                        "\n\n━━━━━━━━━━━━━━━\n"
                         "📢 みんなの予想\n"
                         "━━━━━━━━━━━━━━━\n\n"
-                        "お前の本命を教えてくれ！\n"
-                        "みんなの予想を集計して、的中率・回収率を記録していくぜ。\n\n"
-                        "👇 本命をタップ！",
-                        quick_reply=honmei_qr,
+                        "お前の本命を教えてくれ！👇"
                     )
+                    qr = honmei_qr  # Replace quick reply with honmei buttons
+
+        _push(user_id, full_text, quick_reply=qr)
 
     except Exception as e:
         logger.exception(f"Error processing LINE message for user {user_id}")
