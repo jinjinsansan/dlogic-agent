@@ -73,7 +73,7 @@ def generate_image(output_path: str):
         ("HELP",  "使い方",     False),
         ("STATS", "俺の成績",   True),
         ("RANK",  "ランキング", True),
-        ("WEB",   "サイト",     False),
+        ("CONTACT", "問い合わせ", False),
     ]
 
     for idx, (sub, label, is_primary) in enumerate(buttons):
@@ -170,7 +170,7 @@ def create_richmenu() -> str:
             },
             {
                 "bounds": {"x": cell_w * 2, "y": cell_h, "width": cell_w, "height": cell_h},
-                "action": {"type": "uri", "uri": "https://www.dlogicai.in/"}
+                "action": {"type": "message", "text": "問い合わせしたい"}
             },
         ]
     }

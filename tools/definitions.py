@@ -276,4 +276,27 @@ TOOLS = [
             "required": ["race_id"]
         }
     },
+    {
+        "name": "send_inquiry",
+        "description": "ユーザーからの問い合わせ・不具合報告・要望を運営に送信します。ユーザーが「問い合わせ」「エラー報告」「要望」「バグ」「おかしい」「動かない」等の意図を示した場合に使ってください。送信前にユーザーに内容を確認すること。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "enum": ["bug", "request", "question", "other"],
+                    "description": "問い合わせ種別。bug=不具合報告、request=要望、question=質問、other=その他"
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "問い合わせ内容の要約（1-2文）"
+                },
+                "detail": {
+                    "type": "string",
+                    "description": "詳細な内容（ユーザーの発言を含む）"
+                }
+            },
+            "required": ["category", "summary"]
+        }
+    },
 ]
