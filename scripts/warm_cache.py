@@ -42,9 +42,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 PREFETCH_DIR = os.path.join(PROJECT_DIR, 'data', 'prefetch')
+CACHE_DIR = os.path.join(PROJECT_DIR, 'data', 'cache')
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+WARM_CACHE_MODE = os.getenv("WARM_CACHE_MODE", "prediction").lower()
+WARM_CACHE_LOCK_HOURS = int(os.getenv("WARM_CACHE_LOCK_HOURS", "24"))
 
 # Query types to warm (prediction is most important, others are button follow-ups)
-WARM_QUERIES = [
+WARM_QUERIES_ALL = [
     ("prediction", "このレースの予想をしてください。race_id: {race_id}"),
     ("race-flow", "このレースの展開予想をしてください。race_id: {race_id}"),
     ("jockey", "このレースの騎手分析をしてください。race_id: {race_id}"),
@@ -52,6 +57,14 @@ WARM_QUERIES = [
     ("recent-runs", "このレースの出走馬の直近成績を教えてください。race_id: {race_id}"),
     ("odds-probability", "このレースの予測勝率を見せてください。race_id: {race_id}"),
 ]
+
+
+def _select_queries() -> list[tuple[str, str]]:
+    if WARM_CACHE_MODE in ("off", "disable", "disabled", "0", "false"):
+        return []
+    if WARM_CACHE_MODE in ("prediction", "predictions", "predict"):
+        return [WARM_QUERIES_ALL[0]]
+    return WARM_QUERIES_ALL
 
 MAX_TOOL_TURNS = 6
 
@@ -132,6 +145,21 @@ def main():
     date_str = sys.argv[1]
     dry_run = '--dry-run' in sys.argv
 
+    queries = _select_queries()
+    if not queries:
+        logger.info("WARM_CACHE_MODE=off: skip warm_cache")
+        return 0
+
+    lock_path = os.path.join(CACHE_DIR, f"warm_cache_{date_str}.lock")
+    if os.path.exists(lock_path):
+        age_hours = (time.time() - os.path.getmtime(lock_path)) / 3600
+        if age_hours < WARM_CACHE_LOCK_HOURS:
+            logger.info(f"既に実行済み: {date_str} (lock {age_hours:.1f}h) — skip")
+            return 0
+
+    with open(lock_path, "w", encoding="utf-8") as f:
+        f.write(str(time.time()))
+
     # Clean old cache entries first
     clear_old(max_age_hours=36)
 
@@ -155,7 +183,7 @@ def main():
         race_name = race.get('race_name', '')
         logger.info(f"\n[{venue} {race_name}] {race_id}")
 
-        for query_type, msg_template in WARM_QUERIES:
+        for query_type, msg_template in queries:
             total += 1
             user_msg = msg_template.format(race_id=race_id)
             if warm_single(race_id, query_type, user_msg):

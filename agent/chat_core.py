@@ -8,6 +8,7 @@ Yields chunks as the conversation progresses:
 """
 
 import logging
+import random
 
 from agent.engine import (
     call_claude, build_system_prompt, extract_text, get_tool_blocks,
@@ -19,7 +20,7 @@ from agent.response_cache import (
     TOOL_QUERY_MAP,
 )
 from agent.template_router import match_route, route_and_respond
-from config import MAX_TOOL_TURNS
+from config import MAX_TOOL_TURNS, MEMORY_EXTRACT_SAMPLE_RATE
 from db.user_manager import (
     get_memories as db_get_memories,
     add_memories as db_add_memories,
@@ -275,6 +276,10 @@ def run_agent(
 
     # Auto-extract memories (skip for web sessions — no DB)
     skip_memory = is_web_session or cache_used or bool(set(tools_used) & _MEMORY_SKIP_TOOLS)
+    if not skip_memory and MEMORY_EXTRACT_SAMPLE_RATE < 1.0:
+        if random.random() > MEMORY_EXTRACT_SAMPLE_RATE:
+            skip_memory = True
+
     if not skip_memory:
         try:
             new_memories = extract_memories(user_message, response_text)

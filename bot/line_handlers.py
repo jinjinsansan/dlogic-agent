@@ -1,7 +1,10 @@
 """LINE Bot handlers with agentic loop, tool notifications, and quick reply buttons."""
 
+import json
 import logging
 import re
+import time
+import threading
 from datetime import datetime, timezone, timedelta
 
 from linebot.v3 import WebhookHandler
@@ -18,7 +21,7 @@ from linebot.v3.messaging import (
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent
 
-from agent.engine import trim_history
+from agent.engine import trim_history, format_tool_notification
 from agent.chat_core import run_agent
 from agent.response_cache import find_race_id
 from config import LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, ONBOARDING_TEXT
@@ -36,6 +39,7 @@ from db.prediction_manager import (
     record_prediction as db_record_prediction,
     check_prediction as db_check_prediction,
 )
+from db.redis_client import get_redis
 from tools.executor import execute_tool
 
 logger = logging.getLogger(__name__)
@@ -57,6 +61,109 @@ _user_active_race: dict[str, str] = {}
 _daily_greeted: dict[str, str] = {}  # user_id → "YYYY-MM-DD" (JST)
 
 JST = timezone(timedelta(hours=9))
+
+_redis = get_redis()
+_HISTORY_TTL = 12 * 3600
+_ACTIVE_RACE_TTL = 24 * 3600
+_TOOL_NOTICE_DELAY = 5
+
+
+def _redis_key(prefix: str, user_id: str) -> str:
+    return f"line:{prefix}:{user_id}"
+
+
+def _normalize_block(block):
+    if isinstance(block, dict):
+        return block
+    if hasattr(block, "type"):
+        if block.type == "text":
+            return {"type": "text", "text": block.text}
+        if block.type == "tool_use":
+            return {
+                "type": "tool_use",
+                "id": block.id,
+                "name": block.name,
+                "input": block.input,
+            }
+        if block.type == "tool_result":
+            return {
+                "type": "tool_result",
+                "tool_use_id": getattr(block, "tool_use_id", ""),
+                "content": getattr(block, "content", ""),
+            }
+    if isinstance(block, str):
+        return {"type": "text", "text": block}
+    return {"type": "text", "text": str(block)}
+
+
+def _normalize_history(history: list[dict]) -> list[dict]:
+    normalized = []
+    for msg in history:
+        role = msg.get("role")
+        content = msg.get("content")
+        if isinstance(content, list):
+            content = [_normalize_block(b) for b in content]
+        normalized.append({"role": role, "content": content})
+    return normalized
+
+
+def _load_history(user_id: str) -> list[dict]:
+    if _redis:
+        try:
+            raw = _redis.get(_redis_key("history", user_id))
+            if raw:
+                return json.loads(raw)
+        except Exception:
+            logger.exception("Failed to load history from Redis")
+    return user_conversations.get(user_id, [])
+
+
+def _save_history(user_id: str, history: list[dict]) -> None:
+    normalized = _normalize_history(history)
+    if _redis:
+        try:
+            _redis.setex(_redis_key("history", user_id), _HISTORY_TTL,
+                         json.dumps(normalized, ensure_ascii=False))
+        except Exception:
+            logger.exception("Failed to save history to Redis")
+    user_conversations[user_id] = normalized
+
+
+def _get_active_race(user_id: str) -> str | None:
+    if _redis:
+        try:
+            val = _redis.get(_redis_key("active_race", user_id))
+            if val:
+                return val
+        except Exception:
+            logger.exception("Failed to load active race from Redis")
+    return _user_active_race.get(user_id)
+
+
+def _set_active_race(user_id: str, race_id: str) -> None:
+    if _redis:
+        try:
+            _redis.setex(_redis_key("active_race", user_id), _ACTIVE_RACE_TTL, race_id)
+        except Exception:
+            logger.exception("Failed to save active race to Redis")
+    _user_active_race[user_id] = race_id
+
+
+def _clear_active_race(user_id: str) -> None:
+    if _redis:
+        try:
+            _redis.delete(_redis_key("active_race", user_id))
+        except Exception:
+            logger.exception("Failed to clear active race from Redis")
+    _user_active_race.pop(user_id, None)
+
+
+def _safe_db_call(fn, *args, default=None, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except Exception:
+        logger.exception(f"DB error in {getattr(fn, '__name__', 'unknown')}")
+        return default
 
 
 def _should_daily_greet(user_id: str, profile: dict) -> bool:
@@ -129,10 +236,12 @@ def _is_same_race_query(text: str) -> bool:
 
 def _has_pending_honmei(user_id: str, profile_id: str) -> bool:
     """Check if user has a pending honmei pick (viewed race but hasn't picked)."""
-    race_id = _user_active_race.get(user_id)
+    race_id = _get_active_race(user_id)
     if not race_id:
         return False
-    existing = db_check_prediction(profile_id, race_id)
+    existing = _safe_db_call(db_check_prediction, profile_id, race_id, default="error")
+    if existing == "error":
+        return False
     return existing is None
 
 
@@ -199,6 +308,12 @@ def get_honmei_quick_reply(race_id: str) -> QuickReply | None:
     from tools.executor import _race_cache
 
     if race_id not in _race_cache or "entries" not in _race_cache[race_id]:
+        try:
+            execute_tool("get_race_entries", {"race_id": race_id})
+        except Exception:
+            logger.exception(f"Failed to populate entries for honmei: {race_id}")
+
+    if race_id not in _race_cache or "entries" not in _race_cache[race_id]:
         return None
 
     entries = _race_cache[race_id]["entries"]
@@ -253,6 +368,19 @@ def _get_display_name(user_id: str) -> str:
         return "ゲスト"
 
 
+def _send_with_retry(send_fn, request_obj, retries: int = 1) -> bool:
+    for attempt in range(retries + 1):
+        try:
+            send_fn(request_obj)
+            return True
+        except Exception:
+            if attempt < retries:
+                time.sleep(1)
+                continue
+            logger.exception("LINE API send failed")
+            return False
+
+
 def _reply(reply_token: str, text: str, quick_reply: QuickReply = None):
     """Send a reply message with optional quick reply."""
     with ApiClient(configuration) as api_client:
@@ -271,12 +399,11 @@ def _reply(reply_token: str, text: str, quick_reply: QuickReply = None):
                 msg.quick_reply = quick_reply
             messages.append(msg)
 
-        api.reply_message(
-            ReplyMessageRequest(
-                reply_token=reply_token,
-                messages=messages[:5],
-            )
+        req = ReplyMessageRequest(
+            reply_token=reply_token,
+            messages=messages[:5],
         )
+        _send_with_retry(api.reply_message, req)
 
 
 def _push(user_id: str, text: str, quick_reply: QuickReply = None):
@@ -295,12 +422,11 @@ def _push(user_id: str, text: str, quick_reply: QuickReply = None):
         if quick_reply:
             messages[-1].quick_reply = quick_reply
 
-        api.push_message(
-            PushMessageRequest(
-                to=user_id,
-                messages=messages[:5],
-            )
+        req = PushMessageRequest(
+            to=user_id,
+            messages=messages[:5],
         )
+        _send_with_retry(api.push_message, req)
 
 
 # ---------------------------------------------------------------------------
@@ -317,14 +443,18 @@ def _handle_honmei_selection(event, user_id: str, text: str, profile: dict):
     horse_number = int(match.group(1))
     horse_name = match.group(2).strip() or f"{horse_number}番"
 
-    race_id = _user_active_race.get(user_id)
+    race_id = _get_active_race(user_id)
     if not race_id:
-        history = user_conversations.get(user_id, [])
+        history = _load_history(user_id)
         race_id = find_race_id(history)
 
     if not race_id:
         _reply(event.reply_token, "どのレースの本命か分からなかった。先にレースを見てから選んでくれ！",
                quick_reply=get_start_quick_reply())
+        return
+
+    if profile.get("fallback"):
+        _reply(event.reply_token, "今ちょっと登録が不安定みたいだ。少し時間おいてもう一回お願い！")
         return
 
     from tools.executor import _race_cache
@@ -333,25 +463,26 @@ def _handle_honmei_selection(event, user_id: str, text: str, profile: dict):
     if race_id in _race_cache and "entries" in _race_cache[race_id]:
         venue = _race_cache[race_id]["entries"].get("venue", "")
 
-    try:
-        db_record_prediction(
-            user_profile_id=profile["id"],
-            race_id=race_id,
-            horse_number=horse_number,
-            horse_name=horse_name,
-            race_name=race_name,
-            venue=venue,
-        )
-        # Clear pending state
-        _user_active_race.pop(user_id, None)
+    record = _safe_db_call(
+        db_record_prediction,
+        user_profile_id=profile["id"],
+        race_id=race_id,
+        horse_number=horse_number,
+        horse_name=horse_name,
+        race_name=race_name,
+        venue=venue,
+        default=None,
+    )
+    if record:
+        _clear_active_race(user_id)
 
         _reply(event.reply_token,
                f"👊 {horse_number}番 {horse_name} を本命で登録したぜ！\n\nみんなの予想に追加したからな。結果出たら回収率も計算してやるよ。",
                quick_reply=get_quick_reply(["get_race_entries"]))
         logger.info(f"Honmei recorded: user={user_id} race={race_id} horse={horse_number} {horse_name}")
-    except Exception:
-        logger.exception(f"Failed to record honmei for user {user_id}")
-        _reply(event.reply_token, "ごめん、登録でエラーが出ちゃった。もう一回試してくれ！")
+        return
+
+    _reply(event.reply_token, "ごめん、登録でエラーが出ちゃった。もう一回試してくれ！")
 
 
 # ---------------------------------------------------------------------------
@@ -361,7 +492,16 @@ def _handle_honmei_selection(event, user_id: str, text: str, profile: dict):
 def _get_profile(user_id: str, display_name: str) -> dict:
     """Get or create user profile, with in-memory caching."""
     if user_id not in _profile_cache:
-        _profile_cache[user_id] = db_get_or_create_user(user_id, display_name)
+        try:
+            _profile_cache[user_id] = db_get_or_create_user(user_id, display_name)
+        except Exception:
+            logger.exception("Failed to fetch profile from DB; using fallback profile")
+            _profile_cache[user_id] = {
+                "id": f"local_{user_id}",
+                "display_name": display_name,
+                "visit_count": 1,
+                "fallback": True,
+            }
     return _profile_cache[user_id]
 
 
@@ -373,7 +513,9 @@ def handle_follow(event: FollowEvent):
     profile = _get_profile(user_id, display_name)
 
     # Check user status — new users default to 'waitlist'
-    status = get_user_status(profile["id"])
+    status = "active"
+    if not profile.get("fallback"):
+        status = _safe_db_call(get_user_status, profile["id"], default="active") or "active"
     if status == "waitlist":
         _reply(
             event.reply_token,
@@ -405,14 +547,16 @@ def handle_message(event: MessageEvent):
         return
 
     # ── Gate 1: Emergency maintenance check ($0 — no Claude API call) ──
-    if is_maintenance_mode():
-        msg = get_maintenance_message()
+    if _safe_db_call(is_maintenance_mode, default=False):
+        msg = _safe_db_call(get_maintenance_message, default="ただいまメンテナンス中です。")
         _reply(event.reply_token, f"🔧 {msg}")
         return
 
     # ── Gate 2: User status check (waitlist / suspended) ──
     profile = _get_profile(user_id, display_name)
-    status = get_user_status(profile["id"])
+    status = "active"
+    if not profile.get("fallback"):
+        status = _safe_db_call(get_user_status, profile["id"], default="active") or "active"
     if status == "waitlist":
         _reply(
             event.reply_token,
@@ -438,15 +582,18 @@ def handle_message(event: MessageEvent):
 
     # Handle special commands
     if user_text in ("リセット", "会話リセット"):
-        user_conversations.pop(user_id, None)
-        _user_active_race.pop(user_id, None)
+        _save_history(user_id, [])
+        _clear_active_race(user_id)
         _reply(event.reply_token, "了解、会話リセットしたよ！記憶は残してるからね。",
                quick_reply=get_start_quick_reply())
         return
 
     if user_text in ("メモリ", "メモリ確認"):
         profile = _get_profile(user_id, display_name)
-        memories = db_get_memories(profile["id"])
+        if profile.get("fallback"):
+            _reply(event.reply_token, "今ちょっと記憶が不安定みたいだ。少し時間おいてくれ！")
+            return
+        memories = _safe_db_call(db_get_memories, profile["id"], default=[])
         if memories:
             text = f"覚えていること ({len(memories)}件):\n\n"
             for i, m in enumerate(memories, 1):
@@ -458,7 +605,10 @@ def handle_message(event: MessageEvent):
 
     if user_text in ("記憶リセット", "忘れて"):
         profile = _get_profile(user_id, display_name)
-        db_clear_memories(profile["id"])
+        if profile.get("fallback"):
+            _reply(event.reply_token, "今ちょっと記憶が不安定みたいだ。少し時間おいてくれ！")
+            return
+        _safe_db_call(db_clear_memories, profile["id"])
         _reply(event.reply_token, "了解、記憶をリセットしたよ。またイチから覚えていくね！",
                quick_reply=get_start_quick_reply())
         return
@@ -485,7 +635,7 @@ def handle_message(event: MessageEvent):
 
     # ── Honmei blocking: if user has pending pick and tries to change race ──
     if _has_pending_honmei(user_id, profile["id"]):
-        pending_race = _user_active_race.get(user_id, "")
+        pending_race = _get_active_race(user_id) or ""
         # Allow same-race queries (展開, オッズ, etc.) to pass through
         if not _is_same_race_query(user_text):
             # Block and re-show honmei buttons
@@ -502,11 +652,15 @@ def handle_message(event: MessageEvent):
                 return
 
     # Get or create conversation history
-    history = user_conversations.get(user_id, [])
+    history = _load_history(user_id)
 
     # Use shared agentic loop
-    active_rid = _user_active_race.get(user_id)
+    active_rid = _get_active_race(user_id)
     replied = False
+    notified_tools: set[str] = set()
+    pending_notice_tools: list[str] = []
+    pending_notice_timer: threading.Timer | None = None
+    notice_lock = threading.Lock()
 
     try:
         for chunk in run_agent(
@@ -522,7 +676,32 @@ def handle_message(event: MessageEvent):
                 _reply(event.reply_token, "考え中...")
                 replied = True
 
+            elif chunk_type == "tool":
+                tool_name = chunk.get("name", "")
+                if tool_name and tool_name not in notified_tools:
+                    notified_tools.add(tool_name)
+                    with notice_lock:
+                        pending_notice_tools.append(tool_name)
+
+                    if pending_notice_timer is None:
+                        def _send_delayed_notice():
+                            with notice_lock:
+                                tools = list(dict.fromkeys(pending_notice_tools))
+                            if not tools:
+                                return
+                            try:
+                                notice = format_tool_notification(tools)
+                                _push(user_id, notice)
+                            except Exception:
+                                logger.exception("Failed to send tool notification")
+
+                        pending_notice_timer = threading.Timer(_TOOL_NOTICE_DELAY, _send_delayed_notice)
+                        pending_notice_timer.daemon = True
+                        pending_notice_timer.start()
+
             elif chunk_type == "done":
+                if pending_notice_timer and pending_notice_timer.is_alive():
+                    pending_notice_timer.cancel()
                 if not replied:
                     _reply(event.reply_token, "了解👍")
                     replied = True
@@ -530,16 +709,21 @@ def handle_message(event: MessageEvent):
                 full_text = chunk["text"]
                 tools_used = chunk.get("tools_used", [])
                 active_race_id = chunk.get("active_race_id")
-                user_conversations[user_id] = chunk.get("history", history)
+                _save_history(user_id, chunk.get("history", history))
 
                 # Integrate honmei into same message to save push quota
                 qr = get_quick_reply(tools_used)
                 used_set = set(tools_used)
 
                 if used_set & {"get_race_entries", "get_predictions"} and active_race_id:
-                    already_picked = db_check_prediction(profile["id"], active_race_id)
+                    if profile.get("fallback"):
+                        already_picked = True
+                    else:
+                        already_picked = _safe_db_call(db_check_prediction, profile["id"], active_race_id, default="error")
+                        if already_picked == "error":
+                            already_picked = True
                     if not already_picked:
-                        _user_active_race[user_id] = active_race_id
+                        _set_active_race(user_id, active_race_id)
                         honmei_qr = get_honmei_quick_reply(active_race_id)
                         if honmei_qr:
                             full_text += (
@@ -553,5 +737,7 @@ def handle_message(event: MessageEvent):
                 _push(user_id, full_text, quick_reply=qr)
 
     except Exception as e:
+        if pending_notice_timer and pending_notice_timer.is_alive():
+            pending_notice_timer.cancel()
         logger.exception(f"Error processing LINE message for user {user_id}")
         _push(user_id, "ごめん、ちょっとエラーが出ちゃった。もう一回言ってもらえる？")
