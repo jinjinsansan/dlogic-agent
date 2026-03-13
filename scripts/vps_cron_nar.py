@@ -70,7 +70,21 @@ def send_telegram(message):
 
 
 def run_prefetch(date_str, flags, logger):
-    """prefetch_races.py を実行"""
+    """prefetch_races.py を実行（既存JRAデータがあれば統合）"""
+    output_file = os.path.join(PREFETCH_DIR, f"races_{date_str}.json")
+
+    # 既存JRAデータを退避（NARプリフェッチが上書きするため）
+    existing_jra_races = []
+    if os.path.exists(output_file):
+        try:
+            with open(output_file, 'r', encoding='utf-8') as f:
+                existing_data = json.load(f)
+            existing_jra_races = [r for r in existing_data.get('races', []) if not r.get('is_local', True)]
+            if existing_jra_races:
+                logger.info(f"  既存JRAデータ: {len(existing_jra_races)}R（統合予定）")
+        except Exception:
+            pass
+
     cmd = [PYTHON, os.path.join(SCRIPTS_DIR, 'prefetch_races.py'), date_str] + flags
     logger.info(f"実行: {' '.join(cmd)}")
     try:
@@ -85,15 +99,44 @@ def run_prefetch(date_str, flags, logger):
             if line and ('保存' in line or 'レース数' in line or '会場' in line or 'FAIL' in line):
                 logger.info(f"  {line}")
 
-        output_file = os.path.join(PREFETCH_DIR, f"races_{date_str}.json")
         if os.path.exists(output_file):
             with open(output_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            race_count = len(data.get('races', []))
+            nar_races = data.get('races', [])
+
+            # 既存JRAデータを統合
+            if existing_jra_races:
+                all_races = nar_races + existing_jra_races
+                merged = {
+                    "metadata": {
+                        "date": date_str,
+                        "total_races": len(all_races),
+                        "created_at": datetime.now(JST).isoformat(),
+                    },
+                    "races": all_races,
+                }
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    json.dump(merged, f, ensure_ascii=False, indent=2)
+                logger.info(f"  統合: NAR {len(nar_races)}R + JRA {len(existing_jra_races)}R = {len(all_races)}R")
+                race_count = len(all_races)
+            else:
+                race_count = len(nar_races)
+
             size_kb = os.path.getsize(output_file) / 1024
             logger.info(f"  出力: races_{date_str}.json ({size_kb:.1f}KB, {race_count}R)")
             return output_file, race_count
         else:
+            # NARレースなし → 既存JRAデータを復元
+            if existing_jra_races:
+                restored = {
+                    "metadata": {"date": date_str, "total_races": len(existing_jra_races),
+                                 "created_at": datetime.now(JST).isoformat()},
+                    "races": existing_jra_races,
+                }
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    json.dump(restored, f, ensure_ascii=False, indent=2)
+                logger.info(f"  NARなし、JRA {len(existing_jra_races)}R を維持")
+                return output_file, len(existing_jra_races)
             logger.info(f"  出力ファイルなし（レース未掲載の可能性）")
             return None, 0
     except subprocess.TimeoutExpired:
