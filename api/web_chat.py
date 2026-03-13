@@ -21,7 +21,8 @@ from flask import Blueprint, request, Response, jsonify
 
 from agent.chat_core import run_agent
 from agent.engine import TOOL_LABELS, trim_history
-from db.user_manager import build_user_context as db_build_user_context
+from api.auth import verify_auth_header
+from db.user_manager import get_or_create_user, build_user_context as db_build_user_context
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +36,30 @@ _sessions: dict[str, dict] = {}
 _SESSION_MAX_AGE = 6 * 3600
 
 
-def _get_or_create_session(session_id: str) -> dict:
-    """Get existing session or create anonymous one."""
+def _get_or_create_session(session_id: str, auth_payload: dict | None = None) -> dict:
+    """Get existing session or create one. If auth_payload is provided, use Supabase profile."""
+    # Authenticated users: key by line_user_id for cross-session persistence
+    if auth_payload:
+        auth_key = f"auth_{auth_payload['lid']}"
+        if auth_key in _sessions:
+            session = _sessions[auth_key]
+            session["last_active"] = datetime.now(timezone.utc).timestamp()
+            return session
+
+        # Create authenticated session with Supabase profile
+        profile = get_or_create_user(auth_payload["lid"], auth_payload["name"])
+        session = {
+            "profile": profile,
+            "history": [],
+            "active_race_id": None,
+            "created_at": datetime.now(timezone.utc).timestamp(),
+            "last_active": datetime.now(timezone.utc).timestamp(),
+        }
+        _sessions[auth_key] = session
+        logger.info(f"New authenticated web session: {auth_payload['name']}")
+        return session
+
+    # Anonymous fallback
     if session_id in _sessions:
         session = _sessions[session_id]
         session["last_active"] = datetime.now(timezone.utc).timestamp()
@@ -94,7 +117,8 @@ def chat():
     if len(_sessions) > 100:
         _cleanup_old_sessions()
 
-    session = _get_or_create_session(session_id)
+    auth_payload = verify_auth_header()
+    session = _get_or_create_session(session_id, auth_payload)
     profile = session["profile"]
     history = session["history"]
 

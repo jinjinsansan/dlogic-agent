@@ -13,6 +13,7 @@ from linebot.v3.exceptions import InvalidSignatureError
 from bot.line_handlers import handler as line_handler
 from api.web_chat import bp as web_chat_bp
 from api.data_api import bp as data_api_bp
+from api.auth import bp as auth_bp
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -33,7 +34,7 @@ CORS(flask_app, resources={
             "http://localhost:3000",  # dev
         ],
         "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type"],
+        "allow_headers": ["Content-Type", "Authorization"],
     }
 })
 
@@ -42,6 +43,9 @@ flask_app.register_blueprint(web_chat_bp)
 
 # Register Data API blueprint (for dlogic-note etc.)
 flask_app.register_blueprint(data_api_bp)
+
+# Register LINE Login auth blueprint
+flask_app.register_blueprint(auth_bp)
 
 # Prefetch data directory
 PREFETCH_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'prefetch')
