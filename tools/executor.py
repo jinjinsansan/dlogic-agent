@@ -10,8 +10,17 @@ from datetime import datetime
 
 import requests
 
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
 from config import DLOGIC_API_URL, TELEGRAM_BOT_TOKEN, ADMIN_TELEGRAM_CHAT_ID
 from scrapers import jra, nar, archive
+
+# Backend API session with retry
+_backend_session = requests.Session()
+_retry = Retry(total=3, backoff_factor=2, status_forcelist=[502, 503, 504])
+_backend_session.mount("http://", HTTPAdapter(max_retries=_retry))
+_backend_session.mount("https://", HTTPAdapter(max_retries=_retry))
 from scrapers.odds import fetch_realtime_odds
 from scrapers.horse_weight import fetch_horse_weights
 from scrapers.training_comment import fetch_training_comments
@@ -533,7 +542,7 @@ def _get_predictions(params: dict) -> str:
     }
 
     try:
-        resp = requests.post(
+        resp = _backend_session.post(
             f"{DLOGIC_API_URL}/api/v2/predictions/newspaper",
             json=payload,
             timeout=60,
@@ -945,7 +954,7 @@ def _call_analysis_api(endpoint: str, params: dict) -> str:
         return json.dumps({"error": "出馬表データがありません。先にレースの出馬表を取得してください。"}, ensure_ascii=False)
 
     try:
-        resp = requests.post(
+        resp = _backend_session.post(
             f"{DLOGIC_API_URL}{endpoint}",
             json=params,
             timeout=60,

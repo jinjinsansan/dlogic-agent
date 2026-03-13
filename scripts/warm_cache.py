@@ -95,8 +95,12 @@ def warm_single(race_id: str, query_type: str, user_msg: str) -> bool:
 
             tool_results = []
             for tb in tool_blocks:
+                # warm_cacheはユーザーリクエストではないのでinquiry送信をスキップ
+                if tb.name == "send_inquiry":
+                    result = json.dumps({"status": "skipped", "message": "warm_cacheではスキップ"}, ensure_ascii=False)
+                else:
+                    result = execute_tool(tb.name, tb.input if isinstance(tb.input, dict) else {})
                 tools_used.append(tb.name)
-                result = execute_tool(tb.name, tb.input if isinstance(tb.input, dict) else {})
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tb.id,

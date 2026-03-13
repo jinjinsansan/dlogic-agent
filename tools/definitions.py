@@ -32,7 +32,7 @@ TOOLS = [
             "properties": {
                 "race_id": {
                     "type": "string",
-                    "description": "netkeiba.comのレースID（例: '202406050811'）"
+                    "description": "レースID（例: '202406050811'）"
                 },
                 "race_type": {
                     "type": "string",
@@ -65,7 +65,7 @@ TOOLS = [
             "properties": {
                 "race_id": {
                     "type": "string",
-                    "description": "netkeiba.comのレースID（例: '202406050811'）"
+                    "description": "レースID（例: '202406050811'）"
                 },
                 "race_type": {
                     "type": "string",
@@ -84,7 +84,7 @@ TOOLS = [
             "properties": {
                 "race_id": {
                     "type": "string",
-                    "description": "netkeiba.comのレースID（例: '202406050811'）"
+                    "description": "レースID（例: '202406050811'）"
                 },
                 "race_type": {
                     "type": "string",
@@ -103,7 +103,7 @@ TOOLS = [
             "properties": {
                 "race_id": {
                     "type": "string",
-                    "description": "netkeiba.comのレースID（例: '202406050811'）"
+                    "description": "レースID（例: '202406050811'）"
                 }
             },
             "required": ["race_id"]
