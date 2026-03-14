@@ -18,7 +18,16 @@ from scrapers import jra, nar, archive
 
 # Backend API session with retry
 _backend_session = requests.Session()
-_retry = Retry(total=3, backoff_factor=2, status_forcelist=[502, 503, 504])
+_retry = Retry(
+    total=3,
+    connect=3,
+    read=3,
+    status=3,
+    backoff_factor=2,
+    status_forcelist=[502, 503, 504],
+    allowed_methods=frozenset(["GET", "POST"]),
+    raise_on_status=False,
+)
 _backend_session.mount("http://", HTTPAdapter(max_retries=_retry))
 _backend_session.mount("https://", HTTPAdapter(max_retries=_retry))
 from scrapers.odds import fetch_realtime_odds
@@ -129,50 +138,56 @@ def execute_tool(tool_name: str, tool_input: dict, context: dict | None = None) 
         tool_input: Tool parameters from Claude.
         context: Optional context dict with user info (e.g. {"user_profile_id": "..."}).
     """
+    start = time.monotonic()
     logger.info(f"Tool call: {tool_name} with keys={list(tool_input.keys())}")
     try:
         if tool_name == "get_today_races":
-            return _get_today_races(tool_input)
+            result = _get_today_races(tool_input)
         elif tool_name == "get_race_entries":
-            return _get_race_entries(tool_input)
+            result = _get_race_entries(tool_input)
         elif tool_name == "get_predictions":
-            return _get_predictions(tool_input)
+            result = _get_predictions(tool_input)
         elif tool_name == "get_realtime_odds":
-            return _get_realtime_odds(tool_input)
+            result = _get_realtime_odds(tool_input)
         elif tool_name == "get_horse_weights":
-            return _get_horse_weights(tool_input)
+            result = _get_horse_weights(tool_input)
         elif tool_name == "get_training_comments":
-            return _get_training_comments(tool_input)
+            result = _get_training_comments(tool_input)
         elif tool_name == "search_horse":
-            return _search_horse(tool_input)
+            result = _search_horse(tool_input)
         elif tool_name == "get_race_flow":
-            return _call_analysis_api("/api/v2/analysis/race-flow", tool_input)
+            result = _call_analysis_api("/api/v2/analysis/race-flow", tool_input)
         elif tool_name == "get_jockey_analysis":
-            return _call_analysis_api("/api/v2/analysis/jockey-analysis", tool_input)
+            result = _call_analysis_api("/api/v2/analysis/jockey-analysis", tool_input)
         elif tool_name == "get_bloodline_analysis":
-            return _call_analysis_api("/api/v2/analysis/bloodline-analysis", tool_input)
+            result = _call_analysis_api("/api/v2/analysis/bloodline-analysis", tool_input)
         elif tool_name == "get_recent_runs":
-            return _call_analysis_api("/api/v2/analysis/recent-runs", tool_input)
+            result = _call_analysis_api("/api/v2/analysis/recent-runs", tool_input)
         elif tool_name == "record_user_prediction":
-            return _record_user_prediction(tool_input, context)
+            result = _record_user_prediction(tool_input, context)
         elif tool_name == "check_user_prediction":
-            return _check_user_prediction(tool_input, context)
+            result = _check_user_prediction(tool_input, context)
         elif tool_name == "get_my_stats":
-            return _get_my_stats(tool_input, context)
+            result = _get_my_stats(tool_input, context)
         elif tool_name == "get_prediction_ranking":
-            return _get_prediction_ranking(tool_input)
+            result = _get_prediction_ranking(tool_input)
         elif tool_name == "get_odds_probability":
-            return _get_odds_probability(tool_input)
+            result = _get_odds_probability(tool_input)
         elif tool_name == "get_stable_comments":
-            return _get_stable_comments(tool_input)
+            result = _get_stable_comments(tool_input)
         elif tool_name == "get_engine_stats":
-            return _get_engine_stats(tool_input)
+            result = _get_engine_stats(tool_input)
         elif tool_name == "send_inquiry":
-            return _send_inquiry(tool_input, context)
+            result = _send_inquiry(tool_input, context)
         else:
-            return json.dumps({"error": f"Unknown tool: {tool_name}"}, ensure_ascii=False)
+            result = json.dumps({"error": f"Unknown tool: {tool_name}"}, ensure_ascii=False)
+
+        elapsed = time.monotonic() - start
+        logger.info(f"Tool done: {tool_name} in {elapsed:.2f}s")
+        return result
     except Exception as e:
-        logger.exception(f"Tool execution error: {tool_name}")
+        elapsed = time.monotonic() - start
+        logger.exception(f"Tool execution error: {tool_name} ({elapsed:.2f}s)")
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
 
@@ -346,6 +361,7 @@ def _get_race_entries(params: dict) -> str:
                         "headcount": len(pf['horses']),
                         "entries": entries,
                         "source": "prefetch",
+                        "odds": pf.get('odds', []),
                     }
                     if pf.get('predictions'):
                         result["predictions"] = _rename_prediction_keys(pf['predictions'])
@@ -580,6 +596,13 @@ def _get_predictions(params: dict) -> str:
         return json.dumps(resp_data, ensure_ascii=False)
 
     except requests.RequestException as e:
+        if race_id and race_id in _race_cache and "predictions" in _race_cache[race_id]:
+            logger.warning(f"Prediction API failed; using cached predictions for {race_id}")
+            return json.dumps({
+                "race_id": race_id,
+                "predictions": _race_cache[race_id]["predictions"],
+                "stale": True,
+            }, ensure_ascii=False)
         return json.dumps({"error": f"予想APIへの接続に失敗しました: {str(e)}"}, ensure_ascii=False)
 
 
@@ -620,6 +643,20 @@ def _get_realtime_odds(params: dict) -> str:
             _race_cache[race_id]["entries"]["track_condition"] = track_condition
 
     if not odds_map:
+        if race_id in _race_cache and "realtime" in _race_cache[race_id]:
+            rt = _race_cache[race_id]["realtime"]
+            if rt.get("odds"):
+                logger.info(f"Using stale odds cache for {race_id}")
+                sorted_odds = dict(sorted(rt["odds"].items()))
+                result = {
+                    "race_id": race_id,
+                    "odds": {str(k): v for k, v in sorted_odds.items()},
+                    "stale": True,
+                }
+                if rt.get("track_condition"):
+                    result["track_condition"] = rt["track_condition"]
+                return json.dumps(result, ensure_ascii=False)
+
         result = {"race_id": race_id, "odds": {}}
         if track_condition:
             result["track_condition"] = track_condition
@@ -660,6 +697,16 @@ def _get_horse_weights(params: dict) -> str:
         _race_cache[race_id]["realtime"]["fetched_at"] = time.time()
 
     if not weight_map:
+        if race_id in _race_cache and "realtime" in _race_cache[race_id]:
+            rt = _race_cache[race_id]["realtime"]
+            if rt.get("horse_weights"):
+                logger.info(f"Using stale horse weights cache for {race_id}")
+                return json.dumps({
+                    "race_id": race_id,
+                    "horse_weights": {str(k): v for k, v in sorted(rt["horse_weights"].items())},
+                    "stale": True,
+                }, ensure_ascii=False)
+
         return json.dumps({
             "race_id": race_id,
             "horse_weights": {},
@@ -746,11 +793,31 @@ def _get_stable_comments(params: dict) -> str:
     # Extract date from race_id (custom format: YYYYMMDD-venue-num)
     if "-" in race_id:
         date_str = race_id.split("-")[0]
-    elif race_id.isdigit() and len(race_id) >= 8:
-        # netkeiba format: first 4 digits = year, next 2 = month-ish
-        # For NAR: 202603120311 → date is embedded differently
-        # Try prefetch to get date
-        pass
+    elif race_id.isdigit() and len(race_id) >= 10:
+        # netkeiba JRA format: YYYYJJKKRRNN → extract date from prefetch
+        # Try to find date from race cache or prefetch
+        if race_id in _race_cache and "entries" in _race_cache[race_id]:
+            # date might be in the prefetch data
+            cached_entries = _race_cache[race_id]["entries"]
+            date_str = cached_entries.get("date", "")
+        if not date_str:
+            # Search all prefetch files for this race_id
+            import glob
+            for pf_file in glob.glob(os.path.join(PREFETCH_DIR, "races_*.json")):
+                try:
+                    with open(pf_file, 'r', encoding='utf-8') as f:
+                        pf_data = json.load(f)
+                    for r in pf_data.get("races", []):
+                        if r.get("race_id") == race_id:
+                            date_str = r.get("date", os.path.basename(pf_file).replace("races_", "").replace(".json", ""))
+                            venue = venue or r.get("venue", "")
+                            race_number = race_number or r.get("race_number", 0)
+                            is_chihou = r.get("is_local", False)
+                            break
+                except Exception:
+                    pass
+                if date_str:
+                    break
 
     # Try prefetch for missing info
     if not venue or not race_number or not date_str:
@@ -774,7 +841,7 @@ def _get_stable_comments(params: dict) -> str:
         return json.dumps({
             "race_id": race_id,
             "stable_comments": {},
-            "note": "厩舎コメントが取得できませんでした（未公開、または対象外のレースです）",
+            "note": "関係者情報が取得できませんでした（未公開、または対象外のレースです）",
         }, ensure_ascii=False)
 
     result = {
@@ -848,6 +915,8 @@ def _cache_race_data(race_id: str, entries: list[dict], race_info: dict):
         "distance": race_info.get("distance", ""),
         "track_condition": race_info.get("track_condition", "良"),
         "race_type": race_type,
+        "race_name": race_info.get("race_name", ""),
+        "odds": race_info.get("odds", []),
     }
     logger.info(f"Cached race data for {race_id}: {len(entries)} horses")
 
@@ -969,6 +1038,14 @@ def _call_analysis_api(endpoint: str, params: dict) -> str:
 
         return json.dumps(data, ensure_ascii=False)
     except requests.RequestException as e:
+        if race_id and race_id in _race_cache:
+            analysis_cache = _race_cache[race_id].get("analysis", {})
+            if endpoint in analysis_cache:
+                cached = analysis_cache[endpoint]
+                if isinstance(cached, dict):
+                    cached = {**cached, "stale": True}
+                logger.warning(f"Analysis API failed; using cached data for {race_id} {endpoint}")
+                return json.dumps(cached, ensure_ascii=False)
         return json.dumps({"error": f"分析APIへの接続に失敗: {str(e)}"}, ensure_ascii=False)
 
 
@@ -1095,6 +1172,13 @@ def _get_odds_probability(params: dict) -> str:
     """Calculate win/place probabilities from odds for all horses in a race."""
     race_id = params.get("race_id", "")
 
+    # Ensure entries are loaded (needed for horse names/numbers and odds)
+    if race_id not in _race_cache or "entries" not in _race_cache.get(race_id, {}):
+        try:
+            _get_race_entries({"race_id": race_id, "race_type": "jra"})
+        except Exception:
+            pass
+
     # Get odds from race cache or prefetch
     odds_list = []
     horses = []
@@ -1135,9 +1219,35 @@ def _get_odds_probability(params: dict) -> str:
                 horse_numbers = arch.horse_numbers
             odds_list = arch.odds
 
-    if not odds_list or not horses:
+    def _has_valid_odds(values: list) -> bool:
+        for v in values:
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                continue
+            if fv > 0:
+                return True
+        return False
+
+    # If odds missing or all zeros, try realtime odds fetch
+    if horses and horse_numbers and (not odds_list or not _has_valid_odds(odds_list)):
+        race_type = "jra"
+        if race_id in _race_cache and "entries" in _race_cache[race_id]:
+            race_type = _race_cache[race_id]["entries"].get("race_type", "jra")
+        try:
+            rt_json = _get_realtime_odds({"race_id": race_id, "race_type": race_type})
+            rt = json.loads(rt_json)
+            odds_map = rt.get("odds", {})
+            if odds_map:
+                odds_list = [odds_map.get(n, odds_map.get(str(n), 0)) for n in horse_numbers]
+        except Exception:
+            pass
+
+    if not odds_list or not horses or not _has_valid_odds(odds_list):
         return json.dumps({
-            "error": "オッズデータがありません。出馬表を先に取得するか、オッズが公開されてから試してください。"
+            "race_id": race_id,
+            "probabilities": [],
+            "note": "オッズがまだ出てないみたいだ。発走が近づいたらもう一回聞いてくれ！",
         }, ensure_ascii=False)
 
     # Check analysis cache (calculated result is deterministic for same odds)

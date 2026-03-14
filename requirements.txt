@@ -9,3 +9,4 @@ line-bot-sdk>=3.0.0
 flask>=3.0.0
 flask-cors>=6.0.0
 gunicorn>=21.0.0
+redis>=5.0.0

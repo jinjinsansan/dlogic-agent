@@ -549,6 +549,33 @@ def prefetch_date(date_str, do_nar=True, do_jra=False):
         print(f"\nレースが見つかりません（{formatted_date}）")
         return None
 
+    # JRA odds: Playwright batch fetch (JS rendering required)
+    jra_races_needing_odds = [
+        r for r in all_races
+        if not r.get("is_local") and r.get("race_id_netkeiba")
+        and (not r.get("odds") or all(o == 0.0 for o in r.get("odds", [])))
+    ]
+    if jra_races_needing_odds:
+        print(f"\n[JRA] Playwrightでオッズ取得中... ({len(jra_races_needing_odds)}レース)")
+        try:
+            from scrapers.odds import fetch_jra_odds_batch
+            netkeiba_ids = [r["race_id_netkeiba"] for r in jra_races_needing_odds]
+            odds_results = fetch_jra_odds_batch(netkeiba_ids)
+            updated = 0
+            for race in jra_races_needing_odds:
+                nid = race["race_id_netkeiba"]
+                if nid in odds_results:
+                    odds_map = odds_results[nid]
+                    # Update odds array to match horse_numbers order
+                    new_odds = []
+                    for hn in race.get("horse_numbers", []):
+                        new_odds.append(odds_map.get(hn, 0.0))
+                    race["odds"] = new_odds
+                    updated += 1
+            print(f"  オッズ取得完了: {updated}/{len(jra_races_needing_odds)}レース")
+        except Exception as e:
+            print(f"  オッズ取得失敗: {e}")
+
     # 会場別にグループ化して統計
     venues = {}
     for race in all_races:

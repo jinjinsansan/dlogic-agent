@@ -126,6 +126,19 @@ def run_agent(
                 f"このレースの本命は再度聞かないこと。"
             )
 
+    # Inject active race context so Claude knows which race is being discussed
+    if active_race_id_hint:
+        from tools.executor import _race_cache
+        race_info = _race_cache.get(active_race_id_hint, {}).get("entries", {})
+        race_name = race_info.get("race_name", "")
+        venue = race_info.get("venue", "")
+        if race_name or venue:
+            user_context += (
+                f"\n\n【現在のレース】{venue} {race_name} (race_id: {active_race_id_hint})\n"
+                f"ユーザーが「予想は？」「展開は？」「どう思う？」「分析は？」等と聞いた場合、"
+                f"このレースについて答えろ。レースを聞き返すな。"
+            )
+
     system = build_system_prompt(user_context)
     history = trim_history(history)
 
@@ -136,7 +149,8 @@ def run_agent(
         logger.info(f"Template route matched: {route_name}")
         history.append({"role": "user", "content": user_message})
 
-        result = route_and_respond(route_name, route_params, None, history, profile)
+        result = route_and_respond(route_name, route_params, None, history, profile,
+                                   active_race_id_hint=active_race_id_hint)
         if result:
             logger.info(f"Template route handled: {route_name} (Claude API skipped)")
             for entry in result.get("history_entries", []):

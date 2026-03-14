@@ -11,6 +11,7 @@ Claude has full context when called for free-form questions like "お前どう�
 import json
 import logging
 import re
+import uuid
 
 from tools.executor import execute_tool
 
@@ -160,8 +161,18 @@ def _fmt_odds(data: dict) -> str:
     name_map = {}
     for e in entries:
         name_map[str(e.get("horse_number", ""))] = e.get("horse_name", "")
+    if not name_map:
+        horses = data.get("_horses", [])
+        nums = data.get("_horse_numbers", [])
+        for i, num in enumerate(nums):
+            if i < len(horses):
+                name_map[str(num)] = horses[i]
 
+    is_prefetch = data.get("_prefetch", False)
     lines = ["━━━ オッズ ━━━"]
+    if is_prefetch:
+        lines.append("※前日オッズ（リアルタイムは発売開始後に更新）")
+        lines.append("")
     sorted_odds = sorted(odds.items(), key=lambda x: float(x[1]) if x[1] else 999)
     circled = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱"
     for i, (num, val) in enumerate(sorted_odds):
@@ -182,6 +193,12 @@ def _fmt_weights(data: dict) -> str:
     name_map = {}
     for e in entries:
         name_map[str(e.get("horse_number", ""))] = e.get("horse_name", "")
+    if not name_map:
+        horses = data.get("_horses", [])
+        nums = data.get("_horse_numbers", [])
+        for i, num in enumerate(nums):
+            if i < len(horses):
+                name_map[str(num)] = horses[i]
 
     lines = ["━━━ 馬体重 ━━━"]
     for num in sorted(weights.keys(), key=lambda x: int(x)):
@@ -198,18 +215,36 @@ def _fmt_odds_probability(data: dict) -> str:
     if not probs:
         return data.get("note", "オッズデータがないから予測勝率が出せないな。")
 
-    lines = ["━━━ 予測勝率 ━━━"]
-    circled = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱"
     sorted_probs = sorted(probs, key=lambda x: -x.get("win_prob", 0))
+
+    lines = ["━━━ 予測勝率 ━━━"]
+    lines.append("")
+    lines.append("馬番  馬名")
+    lines.append("  勝率     複勝率")
+    lines.append("─────────")
+
     for i, p in enumerate(sorted_probs):
         num = p.get("horse_number", "?")
         name = p.get("horse_name", "?")
         wp = p.get("win_prob", 0)
         pp = p.get("place_prob", 0)
-        circle = circled[i] if i < len(circled) else f"{i+1}"
-        lines.append(f"{circle} {num}.{name} 勝率{wp:.1f}% / 複勝率{pp:.1f}%")
+
+        # Rank indicator
+        if i == 0:
+            rank = "🥇"
+        elif i == 1:
+            rank = "🥈"
+        elif i == 2:
+            rank = "🥉"
+        else:
+            rank = "　"
+
+        lines.append(f"{rank} {num}.{name}")
+        lines.append(f"    勝 {wp:5.1f}%  複 {pp:5.1f}%")
+
+    lines.append("")
     lines.append("━━━━━━━━━━")
-    lines.append("※オッズから算出した統計的な確率だ。参考にしてくれ")
+    lines.append("※オッズから算出した統計的確率")
     return "\n".join(lines)
 
 
@@ -231,6 +266,7 @@ def route_and_respond(
     user_id: str,
     history: list[dict],
     profile: dict,
+    active_race_id_hint: str | None = None,
 ) -> dict | None:
     """Execute template route. Returns dict with keys:
         text: str           — formatted response text
@@ -244,6 +280,14 @@ def route_and_respond(
     from agent.engine import format_tools_used_footer
 
     tool_context = {"user_profile_id": profile["id"]}
+
+    def _ensure_entries_cached(race_id: str):
+        """Ensure race entries are in _race_cache (may be missing on different worker)."""
+        if race_id and (race_id not in _race_cache or "entries" not in _race_cache.get(race_id, {})):
+            try:
+                execute_tool("get_race_entries", {"race_id": race_id}, context=tool_context)
+            except Exception:
+                pass
 
     # ── Route: today_races ──
     if route_name == "today_races":
@@ -266,7 +310,7 @@ def route_and_respond(
 
     # ── Route: predictions (needs race_id from history) ──
     if route_name == "predictions":
-        race_id = find_race_id(history)
+        race_id = find_race_id(history) or active_race_id_hint
         if not race_id:
             return None  # Fall through to Claude
 
@@ -291,10 +335,11 @@ def route_and_respond(
 
     # ── Route: odds ──
     if route_name == "odds":
-        race_id = find_race_id(history)
+        race_id = find_race_id(history) or active_race_id_hint
         if not race_id:
             return None
 
+        _ensure_entries_cached(race_id)
         cache_entry = _race_cache.get(race_id, {})
         race_type = cache_entry.get("entries", {}).get("race_type", "jra")
         result_str = execute_tool("get_realtime_odds", {"race_id": race_id, "race_type": race_type}, context=tool_context)
@@ -302,7 +347,21 @@ def route_and_respond(
 
         # Enrich with horse names from cache
         entries_data = cache_entry.get("entries", {})
-        data["_entries"] = entries_data.get("entries", []) if isinstance(entries_data, dict) else []
+        if isinstance(entries_data, dict):
+            data["_horse_numbers"] = entries_data.get("horse_numbers", [])
+            data["_horses"] = entries_data.get("horses", [])
+
+        # JRA fallback: if realtime odds empty, use prefetch odds
+        if not data.get("odds") and entries_data:
+            pf_odds = entries_data.get("odds", [])
+            pf_nums = entries_data.get("horse_numbers", [])
+            if pf_odds and any(o > 0 for o in pf_odds):
+                odds_map = {}
+                for i, num in enumerate(pf_nums):
+                    if i < len(pf_odds) and pf_odds[i] > 0:
+                        odds_map[str(num)] = pf_odds[i]
+                data["odds"] = odds_map
+                data["_prefetch"] = True
 
         text = _fmt_odds(data)
         tools_used = ["get_realtime_odds"]
@@ -318,17 +377,20 @@ def route_and_respond(
 
     # ── Route: weights ──
     if route_name == "weights":
-        race_id = find_race_id(history)
+        race_id = find_race_id(history) or active_race_id_hint
         if not race_id:
             return None
 
+        _ensure_entries_cached(race_id)
         cache_entry = _race_cache.get(race_id, {})
         race_type = cache_entry.get("entries", {}).get("race_type", "jra")
         result_str = execute_tool("get_horse_weights", {"race_id": race_id, "race_type": race_type}, context=tool_context)
         data = json.loads(result_str)
 
         entries_data = cache_entry.get("entries", {})
-        data["_entries"] = entries_data.get("entries", []) if isinstance(entries_data, dict) else []
+        if isinstance(entries_data, dict):
+            data["_horse_numbers"] = entries_data.get("horse_numbers", [])
+            data["_horses"] = entries_data.get("horses", [])
 
         text = _fmt_weights(data)
         tools_used = ["get_horse_weights"]
@@ -344,10 +406,11 @@ def route_and_respond(
 
     # ── Route: odds_probability ──
     if route_name == "odds_probability":
-        race_id = find_race_id(history)
+        race_id = find_race_id(history) or active_race_id_hint
         if not race_id:
             return None
 
+        _ensure_entries_cached(race_id)
         result_str = execute_tool("get_odds_probability", {"race_id": race_id}, context=tool_context)
         data = json.loads(result_str)
         text = _fmt_odds_probability(data)
@@ -394,9 +457,9 @@ def _fmt_stats(data: dict) -> str:
     lines = ["━━━ お前の成績 ━━━"]
 
     if stats:
-        total = stats.get("total_predictions", 0)
+        total = stats.get("total_picks", 0)
         wins = stats.get("total_wins", 0)
-        hit_rate = (wins / total * 100) if total > 0 else 0
+        hit_rate = stats.get("win_rate") if stats.get("win_rate") is not None else ((wins / total * 100) if total > 0 else 0)
         recovery = stats.get("recovery_rate", 0)
         streak = stats.get("current_streak", 0)
         best = stats.get("best_payout", 0)
@@ -438,13 +501,15 @@ def _build_history_entries(
     This ensures Claude has full context when called later for opinions.
     """
     # Simulate: assistant called tool → user provided result → assistant responded
+    # Use proper toolu_ prefix with UUID to satisfy Claude API validation
+    tool_use_id = f"toolu_{uuid.uuid4().hex[:24]}"
     return [
         {
             "role": "assistant",
             "content": [
                 {
                     "type": "tool_use",
-                    "id": f"tmpl_{tool_name}",
+                    "id": tool_use_id,
                     "name": tool_name,
                     "input": tool_input,
                 }
@@ -455,7 +520,7 @@ def _build_history_entries(
             "content": [
                 {
                     "type": "tool_result",
-                    "tool_use_id": f"tmpl_{tool_name}",
+                    "tool_use_id": tool_use_id,
                     "content": tool_result,
                 }
             ],

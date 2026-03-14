@@ -182,11 +182,33 @@ def extract_memories(user_message: str, assistant_response: str) -> list[str]:
 
 
 def trim_history(conversation_history: list[dict], max_turns: int = 10) -> list[dict]:
-    """Trim conversation history to keep only the last N turns to manage context size."""
+    """Trim conversation history to keep only the last N turns to manage context size.
+
+    Ensures we never split tool_use/tool_result pairs, which would cause
+    Claude API 400 errors.
+    """
     if len(conversation_history) <= max_turns * 2:
         return conversation_history
 
     trimmed = conversation_history[-(max_turns * 2):]
-    if trimmed and trimmed[0]["role"] != "user":
-        trimmed = trimmed[1:]
+
+    # Walk forward to find a safe starting point:
+    # - Must start with a "user" role message
+    # - Must not start with a tool_result (orphaned from its tool_use)
+    while trimmed:
+        msg = trimmed[0]
+        if msg["role"] != "user":
+            trimmed = trimmed[1:]
+            continue
+        # Check if this user message contains tool_result blocks
+        content = msg.get("content", "")
+        if isinstance(content, list) and any(
+            isinstance(b, dict) and b.get("type") == "tool_result" for b in content
+        ):
+            # This is a tool_result — its matching tool_use was trimmed off.
+            # Skip this and the next assistant message too.
+            trimmed = trimmed[1:]
+            continue
+        break
+
     return trimmed

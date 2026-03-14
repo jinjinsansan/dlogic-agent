@@ -27,6 +27,20 @@ _BASE_URL = "https://p.keibabook.co.jp"
 _MOBILE_URL = "https://s.keibabook.co.jp"
 _USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
+
+def _request_with_retry(session: requests.Session, method: str, url: str, retries: int = 3, **kwargs) -> requests.Response | None:
+    for attempt in range(retries):
+        try:
+            resp = session.request(method, url, timeout=15, **kwargs)
+            resp.raise_for_status()
+            return resp
+        except Exception:
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            logger.exception(f"keibabook: request failed {method} {url}")
+            return None
+
 # Venue name → keibabook venue code mapping (NAR)
 VENUE_CODE_MAP = {
     "大井": "10",
@@ -77,8 +91,9 @@ def _get_session() -> requests.Session | None:
         s.headers.update({"User-Agent": _USER_AGENT})
 
         # Get CSRF token
-        r = s.get(f"{_BASE_URL}/login/login", timeout=15)
-        r.raise_for_status()
+        r = _request_with_retry(s, "get", f"{_BASE_URL}/login/login")
+        if not r:
+            return None
         soup = BeautifulSoup(r.text, "html.parser")
         token_el = soup.select_one("input[name=_token]")
         if not token_el:
@@ -95,8 +110,9 @@ def _get_session() -> requests.Session | None:
             "autologin": "1",
             "submitbutton": "ログインする",
         }
-        r2 = s.post(f"{_BASE_URL}/login/login", data=login_data, timeout=15)
-        r2.raise_for_status()
+        r2 = _request_with_retry(s, "post", f"{_BASE_URL}/login/login", data=login_data)
+        if not r2:
+            return None
 
         _session = s
         _session_ts = time.time()
@@ -135,8 +151,9 @@ def fetch_stable_comments(keibabook_race_id: str, is_chihou: bool = True) -> dic
     url = f"{_BASE_URL}/{section}/danwa/{danwa_num}/{keibabook_race_id}"
 
     try:
-        r = s.get(url, timeout=15)
-        r.raise_for_status()
+        r = _request_with_retry(s, "get", url)
+        if not r:
+            return None
     except Exception:
         logger.exception(f"keibabook: failed to fetch {url}")
         return None
@@ -238,8 +255,9 @@ def fetch_race_id_map(date_str: str, venue: str, is_chihou: bool = True) -> dict
     url = f"{_MOBILE_URL}/{section}/nittei/{date_str}{venue_code}"
 
     try:
-        r = s.get(url, timeout=15)
-        r.raise_for_status()
+        r = _request_with_retry(s, "get", url)
+        if not r:
+            return {}
     except Exception:
         logger.exception(f"keibabook: failed to fetch schedule {url}")
         return {}

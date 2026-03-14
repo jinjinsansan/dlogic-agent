@@ -1,7 +1,8 @@
 """LINE Login OAuth endpoints for web chat authentication.
 
-POST /api/auth/line   — Exchange LINE auth code for JWT session token
-GET  /api/auth/me     — Validate token and return user profile
+POST /api/chatauth/line   — Exchange LINE auth code for JWT session token
+POST /api/chatauth/liff   — Exchange LIFF access token for JWT session token
+GET  /api/chatauth/me     — Validate token and return user profile
 """
 
 import hashlib
@@ -76,7 +77,7 @@ def verify_auth_header() -> dict | None:
 # Endpoints
 # ---------------------------------------------------------------------------
 
-@bp.route("/api/auth/line", methods=["POST"])
+@bp.route("/api/chatauth/line", methods=["POST"])
 def line_login():
     """Exchange LINE Login authorization code for a session token."""
     data = request.get_json(silent=True)
@@ -163,7 +164,59 @@ def line_login():
     })
 
 
-@bp.route("/api/auth/me", methods=["GET"])
+@bp.route("/api/chatauth/liff", methods=["POST"])
+def liff_login():
+    """Authenticate using LIFF access token (from LINE app)."""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    access_token = data.get("access_token", "")
+    if not access_token:
+        return jsonify({"error": "Missing access_token"}), 400
+
+    # Get LINE profile using the LIFF access token
+    try:
+        profile_resp = requests.get(
+            "https://api.line.me/v2/profile",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+        if profile_resp.status_code != 200:
+            return jsonify({"error": "LINEプロフィール取得に失敗しました"}), 401
+
+        line_profile = profile_resp.json()
+        line_user_id = line_profile.get("userId", "")
+        display_name = line_profile.get("displayName", "Webユーザー")
+
+        if not line_user_id:
+            return jsonify({"error": "LINE user ID not found"}), 401
+    except Exception as e:
+        logger.error(f"LIFF profile fetch error: {e}")
+        return jsonify({"error": "LINEプロフィール取得エラー"}), 500
+
+    # Upsert user in Supabase
+    try:
+        profile = get_or_create_user(line_user_id, display_name)
+        profile_id = profile["id"]
+    except Exception as e:
+        logger.error(f"Supabase user creation error: {e}")
+        return jsonify({"error": "ユーザー登録エラー"}), 500
+
+    token = _create_token(profile_id, line_user_id, display_name)
+    logger.info(f"LIFF Login success: {display_name} ({line_user_id[:10]}...)")
+
+    return jsonify({
+        "token": token,
+        "user": {
+            "id": profile_id,
+            "display_name": display_name,
+            "status": profile.get("status", "active"),
+        },
+    })
+
+
+@bp.route("/api/chatauth/me", methods=["GET"])
 def me():
     """Return current user profile from token."""
     payload = verify_auth_header()

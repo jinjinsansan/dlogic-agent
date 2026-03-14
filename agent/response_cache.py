@@ -27,7 +27,7 @@ _CACHE_FILE = os.path.join(_CACHE_DIR, 'response_cache.json')
 
 # In-memory read cache (per-worker, refreshed from file)
 _mem_cache: dict[str, dict[str, dict]] = {}
-_mem_cache_mtime: float = 0
+_mem_cache_sig: tuple[int, int] = (0, 0)
 
 # Tool name → query type (for mid-loop detection)
 TOOL_QUERY_MAP = {
@@ -77,16 +77,17 @@ _MSG_PATTERNS = [
 
 def _load_file() -> dict:
     """Load cache from JSON file."""
-    global _mem_cache, _mem_cache_mtime
+    global _mem_cache, _mem_cache_sig
     try:
         if not os.path.exists(_CACHE_FILE):
             return {}
-        mtime = os.path.getmtime(_CACHE_FILE)
-        if mtime == _mem_cache_mtime and _mem_cache:
+        stat = os.stat(_CACHE_FILE)
+        sig = (stat.st_mtime_ns, stat.st_size)
+        if sig == _mem_cache_sig and _mem_cache:
             return _mem_cache
         with open(_CACHE_FILE, 'r', encoding='utf-8') as f:
             _mem_cache = json.load(f)
-        _mem_cache_mtime = mtime
+        _mem_cache_sig = sig
         return _mem_cache
     except Exception:
         return {}
@@ -94,7 +95,7 @@ def _load_file() -> dict:
 
 def _save_file(data: dict):
     """Save cache to JSON file with file locking."""
-    global _mem_cache, _mem_cache_mtime
+    global _mem_cache, _mem_cache_sig
     try:
         tmp = _CACHE_FILE + '.tmp'
         with open(tmp, 'w', encoding='utf-8') as f:
@@ -105,7 +106,8 @@ def _save_file(data: dict):
                 fcntl.flock(f, fcntl.LOCK_UN)
         os.replace(tmp, _CACHE_FILE)
         _mem_cache = data
-        _mem_cache_mtime = os.path.getmtime(_CACHE_FILE)
+        stat = os.stat(_CACHE_FILE)
+        _mem_cache_sig = (stat.st_mtime_ns, stat.st_size)
     except Exception as e:
         logger.warning(f"ResponseCache save error: {e}")
 

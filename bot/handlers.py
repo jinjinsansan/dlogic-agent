@@ -633,20 +633,26 @@ async def resolve_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         .eq("id", inquiry_id) \
         .execute()
 
-    # Notify user via LINE push
+    # Notify user via LINE push (ディーロジのキャラで回答を包む)
     line_user_id = inquiry.get("line_user_id")
     user_name = inquiry.get("display_name", "")
     notified = False
     if line_user_id:
         try:
             from bot.line_handlers import _push, get_start_quick_reply
-            msg = (
-                f"よう{user_name}！\n\n"
-                "お前が運営に送ってくれた問い合わせだけど、運営がすぐ対応してくれたぜ！👊\n"
-            )
             if admin_note:
-                msg += f"\n📝 {admin_note}\n"
-            msg += "\nまた何かあったらいつでも言ってくれ！"
+                msg = (
+                    f"おう{user_name}！運営から回答が来たぜ 💬\n\n"
+                    f"━━━━━━━━━━━━━━━\n"
+                    f"{admin_note}\n"
+                    f"━━━━━━━━━━━━━━━\n\n"
+                    f"わかったか？他にも聞きたいことがあったら気軽に言ってくれ！👊"
+                )
+            else:
+                msg = (
+                    f"おう{user_name}！お前の問い合わせ、運営が確認してくれたぜ！👊\n\n"
+                    "また何かあったらいつでも言ってくれ！"
+                )
             _push(line_user_id, msg, quick_reply=get_start_quick_reply())
             notified = True
         except Exception:
