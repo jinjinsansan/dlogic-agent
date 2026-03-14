@@ -10,7 +10,7 @@ import logging
 
 from agent.engine import (
     call_claude, build_system_prompt, extract_text, get_tool_blocks,
-    format_tools_used_footer, trim_history,
+    trim_history,
 )
 from agent.chat_core import get_web_quick_replies
 from config import MAX_TOOL_TURNS, DLOGIC_API_URL
@@ -78,6 +78,33 @@ TONE_MAP = {
     "kansai": "関西弁。「やで」「やんか」「ちゃうで」「ほんまに」等。",
     "hakata": "博多弁。「ばい」「たい」「よかよ」「〜と？」等。",
 }
+
+
+def _format_mybot_footer(tools_used: list[str], bot_settings: dict) -> str:
+    """MYBOT用フッター: get_predictionsをIMLogicラベルに差し替える."""
+    _MYBOT_TOOL_LABELS = {
+        "get_today_races": "レース一覧取得",
+        "get_race_entries": "出馬表取得",
+        "get_predictions": "IMLogicエンジン",
+        "get_realtime_odds": "リアルタイムオッズ取得",
+        "search_horse": "馬データ検索",
+        "get_race_flow": "展開予想",
+        "get_jockey_analysis": "騎手分析",
+        "get_bloodline_analysis": "血統分析",
+        "get_recent_runs": "直近走分析",
+    }
+    _SKIP = {"get_race_entries_by_name"}
+    seen = set()
+    labels = []
+    for t in tools_used:
+        if t not in seen and t not in _SKIP:
+            seen.add(t)
+            label = _MYBOT_TOOL_LABELS.get(t, t)
+            labels.append(label)
+    if not labels:
+        return ""
+    bot_name = bot_settings.get("bot_name", "MYBOT")
+    return f"─────────────\n⚡ {bot_name} 使用エンジン: " + "、".join(labels)
 
 
 def _build_mybot_system_prompt(bot_settings: dict, user_context: str = "") -> str:
@@ -282,7 +309,7 @@ def run_mybot_agent(
     if not response_text:
         response_text = "ごめん、うまく答えられなかった。もう一回聞いてもらえる？"
 
-    footer = format_tools_used_footer(tools_used)
+    footer = _format_mybot_footer(tools_used, bot_settings)
     full_text = response_text + ("\n\n" + footer if footer else "")
 
     yield {

@@ -11,6 +11,7 @@ from flask_cors import CORS
 from linebot.v3.exceptions import InvalidSignatureError
 
 from bot.line_handlers import handler as line_handler
+from bot.mybot_line_handler import handle_mybot_webhook
 from api.web_chat import bp as web_chat_bp
 from api.data_api import bp as data_api_bp
 from api.auth import bp as auth_bp
@@ -81,6 +82,12 @@ def callback():
         logger.error("Invalid LINE signature")
         abort(400)
     return "OK"
+
+
+@flask_app.route("/mybot/webhook/<user_id>", methods=["POST"])
+def mybot_webhook(user_id):
+    body, status = handle_mybot_webhook(user_id)
+    return body, status
 
 
 @flask_app.route("/health", methods=["GET"])

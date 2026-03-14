@@ -1,4 +1,4 @@
-"""MYBOT API — settings CRUD, icon upload, and chat endpoints.
+"""MYBOT API — settings CRUD, icon upload, chat, and LINE integration.
 
 GET  /api/mybot/settings          — Get user's MYBOT settings
 POST /api/mybot/settings          — Create or update MYBOT settings
@@ -7,6 +7,10 @@ POST /api/mybot/settings/restore  — Restore from history snapshot
 POST /api/mybot/upload-icon       — Upload bot icon image
 GET  /api/mybot/public/<user_id>  — Get public bot info (no auth)
 POST /api/mybot/chat              — MYBOT chat (SSE)
+POST /api/mybot/line/connect      — Connect LINE channel
+POST /api/mybot/line/disconnect   — Disconnect LINE channel
+GET  /api/mybot/line/status       — Get LINE connection status
+POST /api/mybot/line/test         — Send LINE broadcast test message
 """
 
 import json
@@ -14,9 +18,11 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
+import requests as http_requests
 from flask import Blueprint, request, jsonify, Response
 
 from api.auth import verify_auth_header
+from db.encryption import encrypt_value, decrypt_value
 from db.supabase_client import get_client
 
 logger = logging.getLogger(__name__)
@@ -458,3 +464,187 @@ def mybot_chat():
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# LINE Integration
+# ---------------------------------------------------------------------------
+
+@bp.route("/api/mybot/line/connect", methods=["POST"])
+def line_connect():
+    """Connect a LINE channel to the user's MYBOT."""
+    payload = verify_auth_header()
+    if not payload:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    user_id = payload["pid"]
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    channel_id = data.get("channel_id", "").strip()
+    channel_secret = data.get("channel_secret", "").strip()
+    if not channel_id or not channel_secret:
+        return jsonify({"error": "channel_id and channel_secret are required"}), 400
+
+    # 1. Issue access token
+    token_resp = http_requests.post(
+        "https://api.line.me/v2/oauth/accessToken",
+        data={
+            "grant_type": "client_credentials",
+            "client_id": channel_id,
+            "client_secret": channel_secret,
+        },
+    )
+    if token_resp.status_code != 200:
+        logger.warning(f"LINE token issue failed for user {user_id}: {token_resp.text}")
+        return jsonify({"error": "LINE認証に失敗しました。Channel IDとChannel Secretを確認してください。"}), 400
+
+    access_token = token_resp.json().get("access_token")
+    if not access_token:
+        return jsonify({"error": "アクセストークンの取得に失敗しました。"}), 400
+
+    # 2. Verify token works by fetching bot info
+    bot_info_resp = http_requests.get(
+        "https://api.line.me/v2/bot/info",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    if bot_info_resp.status_code != 200:
+        logger.warning(f"LINE bot info failed for user {user_id}: {bot_info_resp.text}")
+        return jsonify({"error": "LINE Botの情報取得に失敗しました。Messaging API チャネルか確認してください。"}), 400
+
+    bot_info = bot_info_resp.json()
+
+    # 3. Set webhook URL
+    webhook_url = f"https://bot.dlogicai.in/mybot/webhook/{user_id}"
+    webhook_resp = http_requests.put(
+        "https://api.line.me/v2/bot/channel/webhook/endpoint",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        },
+        json={"endpoint": webhook_url},
+    )
+    if webhook_resp.status_code != 200:
+        logger.warning(f"LINE webhook set failed for user {user_id}: {webhook_resp.text}")
+        return jsonify({"error": "Webhook URLの設定に失敗しました。"}), 400
+
+    # 4. Encrypt secrets and upsert
+    encrypted_secret = encrypt_value(channel_secret)
+    encrypted_token = encrypt_value(access_token)
+
+    sb = get_client()
+    row = {
+        "user_id": user_id,
+        "channel_id": channel_id,
+        "channel_secret_enc": encrypted_secret,
+        "access_token_enc": encrypted_token,
+        "webhook_url": webhook_url,
+        "bot_name": bot_info.get("displayName", ""),
+        "bot_picture_url": bot_info.get("pictureUrl", ""),
+        "connected_at": datetime.now(timezone.utc).isoformat(),
+    }
+    sb.table("mybot_line_channels").upsert(row, on_conflict="user_id").execute()
+
+    logger.info(f"LINE channel connected for user {user_id} (channel_id={channel_id})")
+    return jsonify({
+        "status": "connected",
+        "bot_name": bot_info.get("displayName"),
+        "bot_picture_url": bot_info.get("pictureUrl"),
+        "webhook_url": webhook_url,
+    })
+
+
+@bp.route("/api/mybot/line/disconnect", methods=["POST"])
+def line_disconnect():
+    """Disconnect the user's LINE channel."""
+    payload = verify_auth_header()
+    if not payload:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    user_id = payload["pid"]
+    sb = get_client()
+    sb.table("mybot_line_channels").delete().eq("user_id", user_id).execute()
+
+    logger.info(f"LINE channel disconnected for user {user_id}")
+    return jsonify({"status": "disconnected"})
+
+
+@bp.route("/api/mybot/line/status", methods=["GET"])
+def line_status():
+    """Get LINE connection status for the authenticated user."""
+    payload = verify_auth_header()
+    if not payload:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    user_id = payload["pid"]
+    sb = get_client()
+
+    result = (
+        sb.table("mybot_line_channels")
+        .select("channel_id, webhook_url, bot_name, bot_picture_url, connected_at")
+        .eq("user_id", user_id)
+        .execute()
+    )
+
+    if not result.data:
+        return jsonify({"connected": False})
+
+    ch = result.data[0]
+    # Mask channel_id: show first 4 and last 2 chars
+    cid = ch["channel_id"]
+    masked_id = f"{cid[:4]}{'*' * max(len(cid) - 6, 0)}{cid[-2:]}" if len(cid) > 6 else cid
+
+    return jsonify({
+        "connected": True,
+        "channel_id": masked_id,
+        "webhook_url": ch["webhook_url"],
+        "bot_name": ch.get("bot_name"),
+        "bot_picture_url": ch.get("bot_picture_url"),
+        "connected_at": ch["connected_at"],
+    })
+
+
+@bp.route("/api/mybot/line/test", methods=["POST"])
+def line_test():
+    """Send a broadcast test message via the connected LINE channel."""
+    payload = verify_auth_header()
+    if not payload:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    user_id = payload["pid"]
+    sb = get_client()
+
+    result = (
+        sb.table("mybot_line_channels")
+        .select("access_token_enc")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not result.data:
+        return jsonify({"error": "LINE連携が設定されていません。先に連携してください。"}), 404
+
+    access_token = decrypt_value(result.data[0]["access_token_enc"])
+
+    broadcast_resp = http_requests.post(
+        "https://api.line.me/v2/bot/message/broadcast",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "messages": [
+                {
+                    "type": "text",
+                    "text": "\U0001f916 MYBOTのLINE連携テストです！正常に動作しています。",
+                }
+            ]
+        },
+    )
+
+    if broadcast_resp.status_code != 200:
+        logger.warning(f"LINE broadcast failed for user {user_id}: {broadcast_resp.text}")
+        return jsonify({"error": "テストメッセージの送信に失敗しました。"}), 400
+
+    logger.info(f"LINE test broadcast sent for user {user_id}")
+    return jsonify({"status": "sent", "message": "テストメッセージを送信しました。"})
