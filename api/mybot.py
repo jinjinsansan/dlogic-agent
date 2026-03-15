@@ -1156,7 +1156,10 @@ def line_connect():
     # Auto-set rich menu (non-blocking, best-effort)
     try:
         from scripts.setup_mybot_richmenu import setup_mybot_richmenu
-        rm_id = setup_mybot_richmenu(access_token)
+        # Fetch owner's x_account for rich menu
+        _owner = sb.table("user_profiles").select("x_account").eq("id", user_id).execute()
+        _x_account = _owner.data[0].get("x_account") if _owner.data else None
+        rm_id = setup_mybot_richmenu(access_token, x_account=_x_account)
         if rm_id:
             logger.info(f"MYBOT rich menu set for user {user_id}: {rm_id}")
         else:
