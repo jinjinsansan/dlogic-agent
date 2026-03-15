@@ -546,6 +546,8 @@ def handle_message(event: MessageEvent):
     if not user_text:
         return
 
+    logger.info(f"[MSG] {display_name} ({user_id}): {user_text[:200]}")
+
     # ── Gate 1: Emergency maintenance check ($0 — no Claude API call) ──
     if _safe_db_call(is_maintenance_mode, default=False):
         msg = _safe_db_call(get_maintenance_message, default="ただいまメンテナンス中です。")

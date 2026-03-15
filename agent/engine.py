@@ -51,6 +51,7 @@ TOOL_LABELS = {
     "get_today_races": "レース一覧取得",
     "get_race_entries": "出馬表取得",
     "get_predictions": "予想エンジン (Dlogic/Ilogic/ViewLogic/MetaLogic)",
+    "get_race_results": "レース結果取得",
     "get_realtime_odds": "リアルタイムオッズ取得",
     "search_horse": "馬データ検索",
     "get_race_flow": "展開予想エンジン",
@@ -359,25 +360,36 @@ def format_tools_used_footer(tools_used: list[str]) -> str:
 
 def extract_memories(user_message: str, assistant_response: str) -> list[str]:
     """
-    Use Claude Haiku to extract memorable facts from a conversation turn.
-    Always uses Claude (cheap) regardless of LLM_PROVIDER setting.
+    Extract memorable facts from a conversation turn.
+    Uses the same provider as the main LLM.
     """
     try:
         conversation_text = f"ユーザー: {user_message}\nアシスタント: {assistant_response}"
 
-        response = _anthropic_client.messages.create(
-            model="claude-haiku-4-5",
-            max_tokens=300,
-            messages=[{
-                "role": "user",
-                "content": MEMORY_EXTRACT_PROMPT + conversation_text,
-            }],
-        )
-
-        text = ""
-        for block in response.content:
-            if block.type == "text":
-                text += block.text
+        if LLM_PROVIDER == "openai":
+            from config import OPENAI_MODEL
+            client = _get_openai_client()
+            response = client.chat.completions.create(
+                model=OPENAI_MODEL,
+                max_tokens=300,
+                messages=[
+                    {"role": "user", "content": MEMORY_EXTRACT_PROMPT + conversation_text},
+                ],
+            )
+            text = response.choices[0].message.content or ""
+        else:
+            response = _anthropic_client.messages.create(
+                model="claude-haiku-4-5",
+                max_tokens=300,
+                messages=[{
+                    "role": "user",
+                    "content": MEMORY_EXTRACT_PROMPT + conversation_text,
+                }],
+            )
+            text = ""
+            for block in response.content:
+                if block.type == "text":
+                    text += block.text
 
         text = text.strip()
         if text == "なし" or not text:

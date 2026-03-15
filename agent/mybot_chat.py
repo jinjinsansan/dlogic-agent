@@ -18,6 +18,33 @@ from tools.executor import execute_tool
 
 logger = logging.getLogger(__name__)
 
+
+def _record_mybot_prediction(
+    bot_user_id: str,
+    race_id: str,
+    race_name: str,
+    venue: str,
+    horse_number: int,
+    horse_name: str,
+) -> None:
+    """Record MYBOT's S-rank pick for recovery rate tracking."""
+    if not bot_user_id:
+        return
+    try:
+        from db.supabase_client import get_client
+        sb = get_client()
+        sb.table("mybot_predictions").upsert({
+            "bot_user_id": bot_user_id,
+            "race_id": race_id,
+            "race_name": race_name,
+            "venue": venue,
+            "s_rank_horse_number": horse_number,
+            "s_rank_horse_name": horse_name,
+        }, on_conflict="bot_user_id,race_id").execute()
+        logger.info(f"Recorded MYBOT prediction: bot={bot_user_id} race={race_id} S={horse_number}.{horse_name}")
+    except Exception:
+        logger.exception("Failed to record MYBOT prediction")
+
 # System prompt template for MYBOT
 _MYBOT_PROMPT_TEMPLATE = """あなたは「{bot_name}」。ユーザーが作成したカスタムAI競馬予想BOT。
 
@@ -93,6 +120,14 @@ TONE_MAP = {
     "keigo": "必ず敬語で話す。語尾は「ですね」「ございます」「いかがでしょうか」「〜かと思います」等。「だぜ」「だな」等のタメ口は絶対に使わない。",
     "kansai": "必ず関西弁で話す。語尾は「やで」「やんか」「ちゃうで」「ほんまに」「せやな」「〜やろ」等。標準語の語尾は使わない。コテコテの関西弁で。",
     "hakata": "必ず博多弁で話す。語尾は「ばい」「たい」「よかよ」「〜と？」「〜けん」「〜ちゃん」等。標準語の語尾は使わない。温かみのある博多弁で。",
+    "tohoku": "必ず東北弁で話す。語尾は「だべ」「んだ」「べした」「〜すぺ」「〜だがら」等。のんびりした温かみのある東北弁で。標準語の語尾は使わない。",
+    "okinawa": "必ず沖縄弁（うちなーぐち）で話す。語尾は「さー」「だからよ」「〜しましょうね」「やっさー」「でーじ（すごい）」等。ゆったりした沖縄の雰囲気で。",
+    "gyaru": "必ずギャル語で話す。「まじ卍」「てか〜」「やばくない？」「〜じゃん的な」「激アツ」「ウケる」「それな」等。テンション高めのギャル口調で。",
+    "ojisama": "必ずお嬢様言葉で話す。語尾は「ですわ」「ましてよ」「〜ではなくて？」「ごきげんよう」「おほほ」等。上品で優雅なお嬢様口調で。",
+    "aniki": "必ず兄貴系の口調で話す。語尾は「〜だろうが！」「いくぞ！」「任せとけ！」「ビビんな！」「根性見せろ！」等。男気あふれる熱い兄貴分の口調で。",
+    "samurai": "必ず武士語で話す。語尾は「であるぞ」「いざ参らん」「〜でござる」「〜じゃ」「心得た」「見事なり」等。戦国武将のような古風な口調で。",
+    "chuunibyou": "必ず厨二病口調で話す。「闇の力が…」「覚醒せよ」「我が眼には見えている」「封印されし馬よ…」「禁忌の予想」等。大げさで中二病的な口調で。",
+    "robot": "必ずロボット口調で話す。「解析完了」「推奨馬ハ…」「勝率計算中…」「データベース照合」「最適解ヲ提示シマス」等。感情を排した機械的な口調で。カタカナ交じりで。",
 }
 
 # Prediction style
@@ -281,6 +316,18 @@ def _execute_imlogic_prediction(race_id: str, bot_settings: dict, context: dict)
                 })
 
             bot_name = bot_settings.get("bot_name", "MYBOT")
+
+            # Auto-record S-rank horse for recovery rate tracking
+            if predictions and predictions[0].get("rank_label") == "S":
+                _record_mybot_prediction(
+                    bot_user_id=bot_settings.get("user_id"),
+                    race_id=race_id,
+                    race_name=entries.get("race_name", ""),
+                    venue=entries.get("venue", ""),
+                    horse_number=predictions[0]["horse_number"],
+                    horse_name=predictions[0].get("horse_name", ""),
+                )
+
             return json.dumps({
                 "engine": "IMLogic",
                 "bot_name": bot_name,

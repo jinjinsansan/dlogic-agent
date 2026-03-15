@@ -26,6 +26,7 @@ from config import TELEGRAM_BOT_TOKEN, ADMIN_TELEGRAM_CHAT_ID
 from db.supabase_client import get_client
 from db.encryption import decrypt_value
 from db.redis_client import get_redis
+from db.user_manager import get_user_status
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,17 @@ def _load_history(user_id: str, sender_id: str) -> list[dict]:
         try:
             raw = _redis.get(_redis_key(user_id, sender_id))
             if raw:
-                return json.loads(raw)
+                history = json.loads(raw)
+                # Guard: discard history containing Anthropic-format tool_result
+                # blocks that are incompatible with OpenAI API
+                for msg in history:
+                    content = msg.get("content")
+                    if isinstance(content, list):
+                        for b in content:
+                            if isinstance(b, dict) and b.get("type") == "tool_result":
+                                logger.info("Discarding old Anthropic-format MYBOT history")
+                                return []
+                return history
         except Exception:
             logger.exception("Failed to load MYBOT history from Redis")
     return []
@@ -459,6 +470,40 @@ def handle_mybot_webhook(user_id: str):
         bot_settings = {}
 
     bot_name = bot_settings.get("bot_name", "MYBOT")
+
+    # ── Waitlist gate: BOT owner must be active ──
+    try:
+        owner_status = get_user_status(user_id)
+    except Exception:
+        logger.exception(f"Failed to check owner status for user_id={user_id}")
+        owner_status = "active"  # fail-open to avoid blocking on DB errors
+
+    if owner_status == "waitlist":
+        # Reply to the first event with a waitlist message
+        for ev in events:
+            rt = ev.get("replyToken", "")
+            if rt:
+                _reply(
+                    access_token, rt,
+                    f"ただいま {bot_name} はウェイトリスト待機中です。\n\n"
+                    "BOTオーナーのアカウントがアクティベートされ次第、"
+                    "自動的に稼働を開始します。\n"
+                    "もうしばらくお待ちください！🙏",
+                )
+                break
+        return "OK", 200
+
+    if owner_status == "suspended":
+        for ev in events:
+            rt = ev.get("replyToken", "")
+            if rt:
+                _reply(
+                    access_token, rt,
+                    f"{bot_name} は現在ご利用いただけません。\n"
+                    "詳細はDlogic運営までお問い合わせください。",
+                )
+                break
+        return "OK", 200
 
     for event in events:
         event_type = event.get("type")

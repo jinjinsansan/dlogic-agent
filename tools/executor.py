@@ -31,6 +31,7 @@ _retry = Retry(
 _backend_session.mount("http://", HTTPAdapter(max_retries=_retry))
 _backend_session.mount("https://", HTTPAdapter(max_retries=_retry))
 from scrapers.odds import fetch_realtime_odds
+from scrapers.race_result import fetch_race_result
 from scrapers.horse_weight import fetch_horse_weights
 from scrapers.training_comment import fetch_training_comments
 from scrapers.horse import search_horse
@@ -147,6 +148,8 @@ def execute_tool(tool_name: str, tool_input: dict, context: dict | None = None) 
             result = _get_race_entries(tool_input)
         elif tool_name == "get_predictions":
             result = _get_predictions(tool_input)
+        elif tool_name == "get_race_results":
+            result = _get_race_results(tool_input)
         elif tool_name == "get_realtime_odds":
             result = _get_realtime_odds(tool_input)
         elif tool_name == "get_horse_weights":
@@ -604,6 +607,52 @@ def _get_predictions(params: dict) -> str:
                 "stale": True,
             }, ensure_ascii=False)
         return json.dumps({"error": f"予想APIへの接続に失敗しました: {str(e)}"}, ensure_ascii=False)
+
+
+def _get_race_results(params: dict) -> str:
+    """Fetch actual race results (finishing order + payout) for a finished race."""
+    race_id = params["race_id"]
+    race_type = params.get("race_type", "jra")
+
+    # Resolve custom race_id format if needed
+    scrape_id = _resolve_netkeiba_race_id(race_id, race_type)
+
+    result = fetch_race_result(scrape_id, race_type)
+    if not result:
+        return json.dumps({
+            "error": "レース結果がまだ確定していません。レースが終了していない可能性があります。"
+        }, ensure_ascii=False)
+
+    # Build user-friendly response
+    top_entries = []
+    for entry in result["finishing_order"][:5]:
+        pos = entry["position"]
+        pos_str = f"{pos}着" if pos > 0 else "除外/中止"
+        top_entries.append({
+            "着順": pos_str,
+            "馬番": entry["horse_number"],
+            "馬名": entry["horse_name"],
+        })
+
+    response = {
+        "status": "finished",
+        "race_id": race_id,
+        "着順": top_entries,
+        "全出走頭数": result["result_json"]["total_horses"],
+        "1着馬番": result["winner_number"],
+        "1着馬名": result["winner_name"],
+    }
+    if result.get("win_payout"):
+        response["単勝払戻"] = f"{result['win_payout']}円"
+
+    # Also include full finishing order if more than 5 horses
+    if len(result["finishing_order"]) > 5:
+        response["全着順"] = [
+            {"着順": e["position"], "馬番": e["horse_number"], "馬名": e["horse_name"]}
+            for e in result["finishing_order"]
+        ]
+
+    return json.dumps(response, ensure_ascii=False)
 
 
 def _get_realtime_odds(params: dict) -> str:

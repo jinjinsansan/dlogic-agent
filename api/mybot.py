@@ -29,6 +29,7 @@ from api.auth import verify_auth_header
 from db.encryption import encrypt_value, decrypt_value
 from db.supabase_client import get_client
 from db.redis_client import get_redis
+from db.user_manager import get_user_status
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,9 @@ _redis = get_redis()
 _INQUIRY_MODE_PREFIX = "mybot:inquiry_mode:web:"
 _INQUIRY_MODE_TTL = 300  # 5 minutes
 _INQUIRY_KEYWORDS = {"Dlogic運営に問い合わせ", "問い合わせしたい", "お問い合わせ"}
+
+# Official Dlogic bot identifier (used for follow system)
+DLOGIC_OFFICIAL_BOT_ID = "00000000-0000-0000-0000-000000000000"
 
 # Default IMLogic weights
 DEFAULT_ITEM_WEIGHTS = {
@@ -483,6 +487,24 @@ def list_public_bots():
         bid = f["bot_user_id"]
         follower_counts[bid] = follower_counts.get(bid, 0) + 1
 
+    # Fetch MYBOT stats (recovery rate)
+    stats_result = (
+        sb.table("mybot_stats")
+        .select("bot_user_id, recovery_rate, win_rate, total_predictions")
+        .in_("bot_user_id", user_ids)
+        .execute()
+    )
+    stats_map = {s["bot_user_id"]: s for s in (stats_result.data or [])}
+
+    # Fetch LINE channel info (basic_id for friend add URL)
+    line_result = (
+        sb.table("mybot_line_channels")
+        .select("user_id, basic_id")
+        .in_("user_id", user_ids)
+        .execute()
+    )
+    line_map = {l["user_id"]: l.get("basic_id", "") for l in (line_result.data or [])}
+
     # Enrich bot data
     for bot in bots:
         uid = bot["user_id"]
@@ -491,13 +513,143 @@ def list_public_bots():
         bot["owner_icon_url"] = owner.get("icon_url")
         bot["owner_x_account"] = owner.get("x_account")
         bot["follower_count"] = follower_counts.get(uid, 0)
+        stats = stats_map.get(uid, {})
+        bot["recovery_rate"] = stats.get("recovery_rate", 0)
+        bot["win_rate"] = stats.get("win_rate", 0)
+        bot["total_predictions"] = stats.get("total_predictions", 0)
+        basic_id = line_map.get(uid, "")
+        # basic_id may already include @ prefix
+        clean_id = basic_id.lstrip("@") if basic_id else ""
+        bot["line_url"] = f"https://line.me/R/ti/p/@{clean_id}" if clean_id else ""
 
-    # Sort by popularity (follower count) if requested
+    # Sort
     if sort == "popular":
         bots.sort(key=lambda b: b["follower_count"], reverse=True)
-    # sort == "recovery" is a placeholder — keep updated_at order for now
+    elif sort == "recovery":
+        bots.sort(key=lambda b: (b["total_predictions"] > 0, b["recovery_rate"]), reverse=True)
 
-    return jsonify({"bots": bots, "total": total})
+    # Prepend Dlogic official bot (always at top)
+    dlogic_card = _get_dlogic_stats(sb)
+
+    # Dlogic follower count
+    dlogic_follows = (
+        sb.table("mybot_follows")
+        .select("id", count="exact")
+        .eq("bot_user_id", DLOGIC_OFFICIAL_BOT_ID)
+        .execute()
+    )
+    dlogic_card["follower_count"] = dlogic_follows.count or 0
+
+    return jsonify({"bots": bots, "total": total, "dlogic": dlogic_card})
+
+
+def _get_dlogic_stats(sb) -> dict:
+    """Compute Dlogic engine recovery rate from engine_hit_rates + race_results."""
+    try:
+        # Get dlogic engine hit rates (last 30 days)
+        from datetime import datetime, timezone, timedelta
+        jst = timezone(timedelta(hours=9))
+        cutoff = (datetime.now(jst) - timedelta(days=30)).strftime("%Y-%m-%d")
+
+        hits_res = (
+            sb.table("engine_hit_rates")
+            .select("race_id, hit_win")
+            .eq("engine", "dlogic")
+            .gte("date", cutoff)
+            .execute()
+        )
+        rows = hits_res.data or []
+        if not rows:
+            return {
+                "recovery_rate": 0, "win_rate": 0,
+                "total_predictions": 0, "total_wins": 0,
+            }
+
+        total = len(rows)
+        win_race_ids = [r["race_id"] for r in rows if r["hit_win"]]
+        total_wins = len(win_race_ids)
+        win_rate = round(total_wins / total * 100, 1) if total else 0
+
+        # Get payouts for winning races
+        total_payout = 0
+        if win_race_ids:
+            results_res = (
+                sb.table("race_results")
+                .select("race_id, win_payout")
+                .in_("race_id", win_race_ids)
+                .execute()
+            )
+            for r in (results_res.data or []):
+                total_payout += r.get("win_payout", 0) or 0
+
+        total_bet = total * 100
+        recovery_rate = round(total_payout / total_bet * 100, 1) if total_bet else 0
+
+        return {
+            "recovery_rate": recovery_rate,
+            "win_rate": win_rate,
+            "total_predictions": total,
+            "total_wins": total_wins,
+        }
+    except Exception:
+        logger.exception("Failed to compute Dlogic stats")
+        return {
+            "recovery_rate": 0, "win_rate": 0,
+            "total_predictions": 0, "total_wins": 0,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Prompt Refinement (AI変換)
+# ---------------------------------------------------------------------------
+
+@bp.route("/api/mybot/refine-prompt", methods=["POST"])
+def refine_prompt():
+    """Convert casual user instructions into an optimized system prompt."""
+    payload = verify_auth_header()
+    if not payload:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    raw_text = (data.get("text") or "").strip()
+    if not raw_text:
+        return jsonify({"error": "テキストを入力してください"}), 400
+    if len(raw_text) > 500:
+        return jsonify({"error": "500文字以内で入力してください"}), 400
+
+    import anthropic
+    from config import ANTHROPIC_API_KEY
+
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            messages=[{
+                "role": "user",
+                "content": f"""以下はAI競馬予想BOTのオーナーが書いた「カスタム指示」です。
+これをAIが理解しやすい明確なシステムプロンプト指示に変換してください。
+
+ルール:
+- 日本語で出力
+- 箇条書きで簡潔に（3〜5項目）
+- 競馬予想BOTへの指示として自然な形に
+- 元の意図を忠実に保つ
+- 200文字以内
+
+入力: {raw_text}
+
+変換後:""",
+            }],
+        )
+        refined = resp.content[0].text.strip()
+        return jsonify({"refined": refined})
+    except Exception:
+        logger.exception("Prompt refinement failed")
+        return jsonify({"error": "変換に失敗しました。もう一度お試しください。"}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -524,18 +676,20 @@ def follow_bot():
 
     sb = get_client()
 
-    # Verify bot exists and is public
-    bot_check = (
-        sb.table("mybot_settings")
-        .select("is_public")
-        .eq("user_id", bot_user_id)
-        .limit(1)
-        .execute()
-    )
-    if not bot_check.data:
-        return jsonify({"error": "Bot not found"}), 404
-    if not bot_check.data[0].get("is_public"):
-        return jsonify({"error": "This bot is private"}), 403
+    # Official Dlogic bot — skip mybot_settings check
+    if bot_user_id != DLOGIC_OFFICIAL_BOT_ID:
+        # Verify bot exists and is public
+        bot_check = (
+            sb.table("mybot_settings")
+            .select("is_public")
+            .eq("user_id", bot_user_id)
+            .limit(1)
+            .execute()
+        )
+        if not bot_check.data:
+            return jsonify({"error": "Bot not found"}), 404
+        if not bot_check.data[0].get("is_public"):
+            return jsonify({"error": "This bot is private"}), 403
 
     # Insert follow (handle duplicate gracefully)
     try:
@@ -776,6 +930,30 @@ def mybot_chat():
     bot_settings = bot_result.data[0]
     is_owner = payload and payload["pid"] == bot_user_id
 
+    # ── Waitlist gate: BOT owner must be active ──
+    try:
+        owner_status = get_user_status(bot_user_id)
+    except Exception:
+        logger.exception(f"Failed to check owner status for bot_user_id={bot_user_id}")
+        owner_status = "active"
+
+    if owner_status == "waitlist":
+        bot_name = bot_settings.get("bot_name", "MYBOT")
+        msg = (
+            f"ただいま {bot_name} はウェイトリスト待機中です。\n\n"
+            "BOTオーナーのアカウントがアクティベートされ次第、"
+            "自動的に稼働を開始します。\nもうしばらくお待ちください！🙏"
+        )
+        return _sse_text_response(msg, session_id)
+
+    if owner_status == "suspended":
+        bot_name = bot_settings.get("bot_name", "MYBOT")
+        return _sse_text_response(
+            f"{bot_name} は現在ご利用いただけません。\n"
+            "詳細はDlogic運営までお問い合わせください。",
+            session_id,
+        )
+
     # Anonymous or non-owner must use public bots only
     if not is_owner and not bot_settings.get("is_public"):
         return jsonify({"error": "This bot is private"}), 403
@@ -968,6 +1146,7 @@ def line_connect():
         "webhook_url": webhook_url,
         "bot_name": bot_info.get("displayName", ""),
         "bot_picture_url": bot_info.get("pictureUrl", ""),
+        "basic_id": bot_info.get("basicId", ""),
         "connected_at": datetime.now(timezone.utc).isoformat(),
     }
     sb.table("mybot_line_channels").upsert(row, on_conflict="user_id").execute()

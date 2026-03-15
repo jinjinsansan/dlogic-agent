@@ -198,12 +198,70 @@ def run(date_str: str = ""):
             logger.exception(f"Error judging predictions for {race_id}")
             errors += 1
 
+        # 6. Judge MYBOT predictions for this race
+        try:
+            _judge_mybot_predictions(
+                race_id=race_id,
+                winner_number=result["winner_number"],
+                win_payout=result["win_payout"],
+            )
+        except Exception:
+            logger.exception(f"Error judging MYBOT predictions for {race_id}")
+
         # Be polite to netkeiba
         time.sleep(2)
 
     logger.info(
         f"=== Done: {fetched} results fetched, {judged} user stats updated, {errors} errors ==="
     )
+
+
+def _judge_mybot_predictions(race_id: str, winner_number: int, win_payout: int) -> None:
+    """Judge all MYBOT predictions for a given race and update stats."""
+    from db.supabase_client import get_client
+    sb = get_client()
+
+    # Find all MYBOT predictions for this race
+    res = sb.table("mybot_predictions").select("*").eq("race_id", race_id).execute()
+    if not res.data:
+        return
+
+    for pred in res.data:
+        bot_user_id = pred["bot_user_id"]
+        is_win = pred["s_rank_horse_number"] == winner_number
+        payout = win_payout if is_win else 0
+
+        # Get or create stats
+        stats_res = sb.table("mybot_stats").select("*").eq("bot_user_id", bot_user_id).execute()
+        if stats_res.data:
+            stats = stats_res.data[0]
+            total_predictions = stats["total_predictions"] + 1
+            total_wins = stats["total_wins"] + (1 if is_win else 0)
+            total_payout = stats["total_payout"] + payout
+        else:
+            total_predictions = 1
+            total_wins = 1 if is_win else 0
+            total_payout = payout
+
+        total_bet = total_predictions * 100
+        recovery_rate = (total_payout / total_bet * 100) if total_bet > 0 else 0
+        win_rate = (total_wins / total_predictions * 100) if total_predictions > 0 else 0
+
+        sb.table("mybot_stats").upsert({
+            "bot_user_id": bot_user_id,
+            "total_predictions": total_predictions,
+            "total_wins": total_wins,
+            "total_payout": total_payout,
+            "recovery_rate": round(recovery_rate, 1),
+            "win_rate": round(win_rate, 1),
+            "last_updated_at": datetime.now(JST).isoformat(),
+        }, on_conflict="bot_user_id").execute()
+
+        logger.info(
+            f"  MYBOT {bot_user_id}: S={pred['s_rank_horse_number']} "
+            f"{'HIT' if is_win else 'MISS'} "
+            f"(recovery={recovery_rate:.1f}%, win={win_rate:.1f}%)"
+        )
 
 
 if __name__ == "__main__":

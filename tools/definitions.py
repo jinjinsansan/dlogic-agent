@@ -58,6 +58,25 @@ TOOLS = [
         }
     },
     {
+        "name": "get_race_results",
+        "description": "終了済みレースの確定結果（着順・払戻）を取得します。1着〜全着順、単勝払戻金額を返します。レースがまだ終わっていない場合はエラーになります。「結果は？」「何着だった？」「勝ったのは？」等の質問で使ってください。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "race_id": {
+                    "type": "string",
+                    "description": "レースID（例: '202406050811'）"
+                },
+                "race_type": {
+                    "type": "string",
+                    "enum": ["jra", "nar"],
+                    "description": "レースの種類。jra=中央競馬、nar=地方競馬"
+                }
+            },
+            "required": ["race_id", "race_type"]
+        }
+    },
+    {
         "name": "get_realtime_odds",
         "description": "指定レースのリアルタイム単勝オッズを取得します。馬番ごとの現在オッズを返します。",
         "input_schema": {

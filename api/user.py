@@ -219,7 +219,7 @@ def upload_user_icon():
         sb.storage.from_("user-icons").upload(
             storage_path,
             file_data,
-            {"content-type": file.content_type},
+            {"content-type": file.content_type, "upsert": "true"},
         )
 
         # Get public URL
