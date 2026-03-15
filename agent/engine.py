@@ -1,15 +1,34 @@
-"""Claude API agent engine with tool use support."""
+"""Agent engine with tool use support — supports Claude and OpenAI-compatible models."""
 
+import json
 import logging
+import uuid
 
 import anthropic
 
-from config import ANTHROPIC_API_KEY, CLAUDE_MODEL, SYSTEM_PROMPT, MAX_TOKENS
+from config import (
+    ANTHROPIC_API_KEY, CLAUDE_MODEL, SYSTEM_PROMPT, MAX_TOKENS,
+    LLM_PROVIDER,
+)
 from tools.definitions import TOOLS
 
 logger = logging.getLogger(__name__)
 
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+# ---------------------------------------------------------------------------
+# Clients
+# ---------------------------------------------------------------------------
+
+_anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+_openai_client = None
+def _get_openai_client():
+    global _openai_client
+    if _openai_client is None:
+        from openai import OpenAI
+        from config import OPENAI_API_KEY
+        _openai_client = OpenAI(api_key=OPENAI_API_KEY)
+    return _openai_client
+
 
 MEMORY_EXTRACT_PROMPT = """以下のユーザーとアシスタントの会話から、ユーザーについて覚えておくべき情報を抽出してください。
 
@@ -57,9 +76,186 @@ HEAVY_TOOLS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Anthropic → OpenAI format converters
+# ---------------------------------------------------------------------------
+
+def _anthropic_tools_to_openai(tools: list[dict]) -> list[dict]:
+    """Convert Anthropic tool definitions to OpenAI function format."""
+    result = []
+    for tool in tools:
+        result.append({
+            "type": "function",
+            "function": {
+                "name": tool["name"],
+                "description": tool.get("description", ""),
+                "parameters": tool.get("input_schema", {"type": "object", "properties": {}}),
+            },
+        })
+    return result
+
+
+def _anthropic_history_to_openai(history: list[dict], system: str) -> list[dict]:
+    """Convert Anthropic-format conversation history to OpenAI format.
+
+    Anthropic format:
+      - {"role": "user", "content": "text" | [{"type": "text", ...}]}
+      - {"role": "assistant", "content": [ContentBlock, ...]}  (may contain tool_use)
+      - {"role": "user", "content": [{"type": "tool_result", "tool_use_id": ..., "content": ...}]}
+
+    OpenAI format:
+      - {"role": "system", "content": "text"}
+      - {"role": "user", "content": "text"}
+      - {"role": "assistant", "content": "text", "tool_calls": [...]}
+      - {"role": "tool", "tool_call_id": ..., "content": "text"}
+    """
+    messages = [{"role": "system", "content": system}]
+
+    for msg in history:
+        role = msg["role"]
+        content = msg.get("content", "")
+
+        if role == "user":
+            # Could be plain text or list of content blocks
+            if isinstance(content, str):
+                messages.append({"role": "user", "content": content})
+            elif isinstance(content, list):
+                # Check if this is a tool_result list
+                tool_results = [b for b in content if isinstance(b, dict) and b.get("type") == "tool_result"]
+                if tool_results:
+                    for tr in tool_results:
+                        tool_content = tr.get("content", "")
+                        if isinstance(tool_content, list):
+                            # Extract text from content blocks
+                            tool_content = "\n".join(
+                                b.get("text", str(b)) for b in tool_content if isinstance(b, dict)
+                            )
+                        if not isinstance(tool_content, str):
+                            tool_content = json.dumps(tool_content, ensure_ascii=False)
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tr.get("tool_use_id", ""),
+                            "content": tool_content,
+                        })
+                else:
+                    # Text content blocks
+                    text_parts = []
+                    for b in content:
+                        if isinstance(b, dict) and b.get("type") == "text":
+                            text_parts.append(b.get("text", ""))
+                        elif isinstance(b, str):
+                            text_parts.append(b)
+                    messages.append({"role": "user", "content": "\n".join(text_parts) or str(content)})
+            else:
+                messages.append({"role": "user", "content": str(content)})
+
+        elif role == "assistant":
+            # Content could be a list of ContentBlocks (Anthropic objects or dicts)
+            text_parts = []
+            tool_calls = []
+
+            if isinstance(content, list):
+                for block in content:
+                    # Handle both Anthropic SDK objects and plain dicts
+                    btype = getattr(block, "type", None) or (block.get("type") if isinstance(block, dict) else None)
+
+                    if btype == "text":
+                        text = getattr(block, "text", None) or (block.get("text") if isinstance(block, dict) else "")
+                        if text:
+                            text_parts.append(text)
+                    elif btype == "tool_use":
+                        tool_id = getattr(block, "id", None) or (block.get("id") if isinstance(block, dict) else str(uuid.uuid4()))
+                        tool_name = getattr(block, "name", None) or (block.get("name") if isinstance(block, dict) else "")
+                        tool_input = getattr(block, "input", None) or (block.get("input") if isinstance(block, dict) else {})
+                        tool_calls.append({
+                            "id": tool_id,
+                            "type": "function",
+                            "function": {
+                                "name": tool_name,
+                                "arguments": json.dumps(tool_input, ensure_ascii=False),
+                            },
+                        })
+            elif isinstance(content, str):
+                text_parts.append(content)
+
+            assistant_msg = {"role": "assistant", "content": "\n".join(text_parts) or None}
+            if tool_calls:
+                assistant_msg["tool_calls"] = tool_calls
+            messages.append(assistant_msg)
+
+    return messages
+
+
+# ---------------------------------------------------------------------------
+# Unified response wrapper (makes OpenAI responses look like Anthropic)
+# ---------------------------------------------------------------------------
+
+class _ContentBlock:
+    """Mimics Anthropic's ContentBlock for compatibility."""
+    def __init__(self, block_type, **kwargs):
+        self.type = block_type
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+
+class _UnifiedResponse:
+    """Wraps an OpenAI response to look like an Anthropic response."""
+    def __init__(self, openai_response):
+        self._raw = openai_response
+        choice = openai_response.choices[0]
+        message = choice.message
+
+        # Build content blocks (Anthropic-style)
+        self.content = []
+        if message.content:
+            self.content.append(_ContentBlock("text", text=message.content))
+        if message.tool_calls:
+            for tc in message.tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments)
+                except (json.JSONDecodeError, TypeError):
+                    args = {}
+                self.content.append(_ContentBlock(
+                    "tool_use",
+                    id=tc.id,
+                    name=tc.function.name,
+                    input=args,
+                ))
+
+        # Map stop reason
+        if choice.finish_reason == "tool_calls":
+            self.stop_reason = "tool_use"
+        else:
+            self.stop_reason = "end_turn"
+
+
+# ---------------------------------------------------------------------------
+# Cached OpenAI tools
+# ---------------------------------------------------------------------------
+
+_openai_tools_cache = None
+def _get_openai_tools():
+    global _openai_tools_cache
+    if _openai_tools_cache is None:
+        _openai_tools_cache = _anthropic_tools_to_openai(TOOLS)
+    return _openai_tools_cache
+
+
+# ---------------------------------------------------------------------------
+# Public API (same interface regardless of provider)
+# ---------------------------------------------------------------------------
+
 def call_claude(conversation_history: list[dict], system: str) -> object:
-    """Single Claude API call with prompt caching."""
-    return client.messages.create(
+    """Single LLM API call with tool use. Dispatches to Claude or OpenAI."""
+    if LLM_PROVIDER == "openai":
+        return _call_openai(conversation_history, system)
+    else:
+        return _call_anthropic(conversation_history, system)
+
+
+def _call_anthropic(conversation_history: list[dict], system: str) -> object:
+    """Claude API call with prompt caching."""
+    return _anthropic_client.messages.create(
         model=CLAUDE_MODEL,
         max_tokens=MAX_TOKENS,
         system=[{
@@ -70,6 +266,20 @@ def call_claude(conversation_history: list[dict], system: str) -> object:
         tools=TOOLS,
         messages=conversation_history,
     )
+
+
+def _call_openai(conversation_history: list[dict], system: str) -> object:
+    """OpenAI-compatible API call, returns Anthropic-compatible response."""
+    from config import OPENAI_MODEL
+    client = _get_openai_client()
+    messages = _anthropic_history_to_openai(conversation_history, system)
+    openai_response = client.chat.completions.create(
+        model=OPENAI_MODEL,
+        max_tokens=MAX_TOKENS,
+        messages=messages,
+        tools=_get_openai_tools(),
+    )
+    return _UnifiedResponse(openai_response)
 
 
 def build_system_prompt(user_context: str = "") -> str:
@@ -86,13 +296,13 @@ def build_system_prompt(user_context: str = "") -> str:
 
 
 def extract_text(response) -> str:
-    """Extract text parts from a Claude response."""
+    """Extract text parts from a response."""
     text_parts = [b.text for b in response.content if b.type == "text"]
     return "\n".join(text_parts)
 
 
 def get_tool_blocks(response) -> list:
-    """Extract tool use blocks from a Claude response."""
+    """Extract tool use blocks from a response."""
     return [b for b in response.content if b.type == "tool_use"]
 
 
@@ -149,14 +359,14 @@ def format_tools_used_footer(tools_used: list[str]) -> str:
 
 def extract_memories(user_message: str, assistant_response: str) -> list[str]:
     """
-    Use Claude to extract memorable facts from a conversation turn.
-    Returns a list of memory strings, or empty list.
+    Use Claude Haiku to extract memorable facts from a conversation turn.
+    Always uses Claude (cheap) regardless of LLM_PROVIDER setting.
     """
     try:
         conversation_text = f"ユーザー: {user_message}\nアシスタント: {assistant_response}"
 
-        response = client.messages.create(
-            model="claude-haiku-4-5",  # Always use Haiku for memory extraction (cheap)
+        response = _anthropic_client.messages.create(
+            model="claude-haiku-4-5",
             max_tokens=300,
             messages=[{
                 "role": "user",
@@ -173,7 +383,6 @@ def extract_memories(user_message: str, assistant_response: str) -> list[str]:
         if text == "なし" or not text:
             return []
 
-        # Split into individual memories
         memories = [line.strip().lstrip("- ・•") for line in text.split("\n") if line.strip()]
         return [m for m in memories if m and m != "なし"]
 
@@ -185,28 +394,22 @@ def trim_history(conversation_history: list[dict], max_turns: int = 10) -> list[
     """Trim conversation history to keep only the last N turns to manage context size.
 
     Ensures we never split tool_use/tool_result pairs, which would cause
-    Claude API 400 errors.
+    API 400 errors.
     """
     if len(conversation_history) <= max_turns * 2:
         return conversation_history
 
     trimmed = conversation_history[-(max_turns * 2):]
 
-    # Walk forward to find a safe starting point:
-    # - Must start with a "user" role message
-    # - Must not start with a tool_result (orphaned from its tool_use)
     while trimmed:
         msg = trimmed[0]
         if msg["role"] != "user":
             trimmed = trimmed[1:]
             continue
-        # Check if this user message contains tool_result blocks
         content = msg.get("content", "")
         if isinstance(content, list) and any(
             isinstance(b, dict) and b.get("type") == "tool_result" for b in content
         ):
-            # This is a tool_result — its matching tool_use was trimmed off.
-            # Skip this and the next assistant message too.
             trimmed = trimmed[1:]
             continue
         break

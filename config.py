@@ -9,6 +9,9 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 DLOGIC_API_URL = os.getenv("DLOGIC_API_URL", "http://localhost:8000")
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic")  # "anthropic" or "openai"
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET", "")
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
 LINE_LOGIN_CHANNEL_ID = os.getenv("LINE_LOGIN_CHANNEL_ID", "")
@@ -62,6 +65,13 @@ C 1.馬名
 
 ## 調教コメント（著作権対策）
 原文コピペ禁止。必ず自分の言葉で要約。ランク（A〜D）はそのまま伝えてOK
+
+## 発走時刻の理解
+レースデータのstart_timeと現在時刻を比較し、レースの状態を把握しろ:
+- 現在時刻より前 → 「まだこれからだな」（予想・分析OK）
+- 現在時刻より後 → 「もう発走済みだな」（予想は意味がない。結果を聞かれたら対応）
+- レース一覧を出す時は、これから発走のレースを優先的に案内しろ
+- 「次のレース」と聞かれたら、現在時刻以降で最も近いレースを答えろ
 
 ## ツール使用（即行動）
 確認質問せず即ツール呼び出し:
