@@ -136,6 +136,7 @@ def save_settings():
         "risk_level": data.get("risk_level", "moderate"),
         "analysis_focus": data.get("analysis_focus", "general"),
         "custom_instructions": (data.get("custom_instructions") or "")[:500],
+        "chat_theme": data.get("chat_theme", "default"),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -158,6 +159,7 @@ def save_settings():
             "risk_level": old.get("risk_level", "moderate"),
             "analysis_focus": old.get("analysis_focus", "general"),
             "custom_instructions": old.get("custom_instructions", ""),
+            "chat_theme": old.get("chat_theme", "default"),
         }
         sb.table("mybot_settings_history").insert({
             "user_id": user_id,
@@ -253,6 +255,7 @@ def restore_settings():
                 "risk_level": old.get("risk_level", "moderate"),
                 "analysis_focus": old.get("analysis_focus", "general"),
                 "custom_instructions": old.get("custom_instructions", ""),
+                "chat_theme": old.get("chat_theme", "default"),
             },
             "label": "復元前の自動バックアップ",
         }).execute()
@@ -273,6 +276,7 @@ def restore_settings():
         "risk_level": snapshot.get("risk_level", "moderate"),
         "analysis_focus": snapshot.get("analysis_focus", "general"),
         "custom_instructions": snapshot.get("custom_instructions", ""),
+        "chat_theme": snapshot.get("chat_theme", "default"),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     # Restore icon_url if present in snapshot
@@ -363,7 +367,7 @@ def get_public_bot(bot_user_id):
 
     result = (
         sb.table("mybot_settings")
-        .select("bot_name, personality, tone, icon_url, description, horse_weight, jockey_weight, item_weights, is_public, user_id")
+        .select("bot_name, personality, tone, icon_url, description, horse_weight, jockey_weight, item_weights, is_public, user_id, chat_theme")
         .eq("user_id", bot_user_id)
         .execute()
     )

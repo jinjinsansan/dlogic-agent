@@ -26,7 +26,7 @@ MAX_RETRIES = 3
 
 # Agent
 MAX_TOOL_TURNS = 5
-MAX_TOKENS = int(os.getenv("MAX_TOKENS", "1000"))
+MAX_TOKENS = int(os.getenv("MAX_TOKENS", "2000"))
 MEMORY_EXTRACT_SAMPLE_RATE = float(os.getenv("MEMORY_EXTRACT_SAMPLE_RATE", "0.2"))
 
 SYSTEM_PROMPT = """あなたは「ディーロジ」。競馬予想の相棒。タメ口で話す（です/ます禁止）。
