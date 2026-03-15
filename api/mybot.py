@@ -6,6 +6,10 @@ GET  /api/mybot/settings/history  — Get settings edit history
 POST /api/mybot/settings/restore  — Restore from history snapshot
 POST /api/mybot/upload-icon       — Upload bot icon image
 GET  /api/mybot/public/<user_id>  — Get public bot info (no auth)
+GET  /api/mybot/public/list       — List all public bots
+POST /api/mybot/follow            — Follow a bot
+DELETE /api/mybot/follow          — Unfollow a bot
+GET  /api/mybot/follows           — Get user's followed bots
 POST /api/mybot/chat              — MYBOT chat (SSE)
 POST /api/mybot/line/connect      — Connect LINE channel
 POST /api/mybot/line/disconnect   — Disconnect LINE channel
@@ -132,6 +136,8 @@ def save_settings():
         "personality": data.get("personality", "friendly"),
         "tone": data.get("tone", "casual"),
         "description": data.get("description", ""),
+        "catchphrase": (data.get("catchphrase") or "")[:100],
+        "self_introduction": (data.get("self_introduction") or "")[:500],
         "horse_weight": data.get("horse_weight", 70),
         "jockey_weight": data.get("jockey_weight", 30),
         "item_weights": data.get("item_weights", DEFAULT_ITEM_WEIGHTS),
@@ -158,6 +164,8 @@ def save_settings():
             "item_weights": old["item_weights"],
             "is_public": old["is_public"],
             "description": old.get("description", ""),
+            "catchphrase": old.get("catchphrase", ""),
+            "self_introduction": old.get("self_introduction", ""),
             "icon_url": old.get("icon_url"),
             "prediction_style": old.get("prediction_style", "balanced"),
             "analysis_depth": old.get("analysis_depth", "standard"),
@@ -254,6 +262,8 @@ def restore_settings():
                 "item_weights": old["item_weights"],
                 "is_public": old["is_public"],
                 "description": old.get("description", ""),
+                "catchphrase": old.get("catchphrase", ""),
+                "self_introduction": old.get("self_introduction", ""),
                 "icon_url": old.get("icon_url"),
                 "prediction_style": old.get("prediction_style", "balanced"),
                 "analysis_depth": old.get("analysis_depth", "standard"),
@@ -276,6 +286,8 @@ def restore_settings():
         "item_weights": snapshot.get("item_weights", DEFAULT_ITEM_WEIGHTS),
         "is_public": snapshot.get("is_public", False),
         "description": snapshot.get("description", ""),
+        "catchphrase": snapshot.get("catchphrase", ""),
+        "self_introduction": snapshot.get("self_introduction", ""),
         "prediction_style": snapshot.get("prediction_style", "balanced"),
         "analysis_depth": snapshot.get("analysis_depth", "standard"),
         "bet_suggestion": snapshot.get("bet_suggestion", "basic"),
@@ -373,7 +385,7 @@ def get_public_bot(bot_user_id):
 
     result = (
         sb.table("mybot_settings")
-        .select("bot_name, personality, tone, icon_url, description, horse_weight, jockey_weight, item_weights, is_public, user_id, chat_theme")
+        .select("bot_name, personality, tone, icon_url, description, catchphrase, self_introduction, horse_weight, jockey_weight, item_weights, is_public, user_id, chat_theme, updated_at")
         .eq("user_id", bot_user_id)
         .execute()
     )
@@ -385,7 +397,245 @@ def get_public_bot(bot_user_id):
     if not bot.get("is_public"):
         return jsonify({"error": "This bot is private"}), 403
 
+    # Get owner profile info
+    owner = (
+        sb.table("user_profiles")
+        .select("display_name, icon_url, x_account")
+        .eq("id", bot_user_id)
+        .limit(1)
+        .execute()
+    )
+    if owner.data:
+        bot["owner_name"] = owner.data[0].get("display_name", "")
+        bot["owner_icon_url"] = owner.data[0].get("icon_url")
+        bot["owner_x_account"] = owner.data[0].get("x_account")
+
+    # Get follower count
+    follows = (
+        sb.table("mybot_follows")
+        .select("id", count="exact")
+        .eq("bot_user_id", bot_user_id)
+        .execute()
+    )
+    bot["follower_count"] = follows.count or 0
+
     return jsonify({"bot": bot})
+
+
+# ---------------------------------------------------------------------------
+# Public BOT listing (みんなのAIBOT)
+# ---------------------------------------------------------------------------
+
+@bp.route("/api/mybot/public/list", methods=["GET"])
+def list_public_bots():
+    """List all public bots for the みんなのAIBOT page."""
+    sort = request.args.get("sort", "new")
+    limit = min(int(request.args.get("limit", 50)), 100)
+    offset = int(request.args.get("offset", 0))
+
+    sb = get_client()
+
+    # Get total count of public bots
+    count_result = (
+        sb.table("mybot_settings")
+        .select("user_id", count="exact")
+        .eq("is_public", True)
+        .execute()
+    )
+    total = count_result.count or 0
+
+    # Fetch public bots (always order by updated_at as base)
+    bots_result = (
+        sb.table("mybot_settings")
+        .select("bot_name, catchphrase, self_introduction, icon_url, user_id, chat_theme, updated_at")
+        .eq("is_public", True)
+        .order("updated_at", desc=True)
+        .range(offset, offset + limit - 1)
+        .execute()
+    )
+
+    bots = bots_result.data or []
+
+    if not bots:
+        return jsonify({"bots": [], "total": total})
+
+    # Collect user_ids to batch-fetch owner profiles and follower counts
+    user_ids = [b["user_id"] for b in bots]
+
+    # Fetch owner profiles
+    profiles_result = (
+        sb.table("user_profiles")
+        .select("id, display_name, icon_url, x_account")
+        .in_("id", user_ids)
+        .execute()
+    )
+    profiles_map = {p["id"]: p for p in (profiles_result.data or [])}
+
+    # Fetch follower counts per bot
+    follows_result = (
+        sb.table("mybot_follows")
+        .select("bot_user_id")
+        .in_("bot_user_id", user_ids)
+        .execute()
+    )
+    follower_counts = {}
+    for f in (follows_result.data or []):
+        bid = f["bot_user_id"]
+        follower_counts[bid] = follower_counts.get(bid, 0) + 1
+
+    # Enrich bot data
+    for bot in bots:
+        uid = bot["user_id"]
+        owner = profiles_map.get(uid, {})
+        bot["owner_name"] = owner.get("display_name", "")
+        bot["owner_icon_url"] = owner.get("icon_url")
+        bot["owner_x_account"] = owner.get("x_account")
+        bot["follower_count"] = follower_counts.get(uid, 0)
+
+    # Sort by popularity (follower count) if requested
+    if sort == "popular":
+        bots.sort(key=lambda b: b["follower_count"], reverse=True)
+    # sort == "recovery" is a placeholder — keep updated_at order for now
+
+    return jsonify({"bots": bots, "total": total})
+
+
+# ---------------------------------------------------------------------------
+# Follow / Unfollow
+# ---------------------------------------------------------------------------
+
+@bp.route("/api/mybot/follow", methods=["POST"])
+def follow_bot():
+    """Follow a public bot."""
+    payload = verify_auth_header()
+    if not payload:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    user_id = payload["pid"]
+    data = request.get_json(silent=True)
+    if not data or not data.get("bot_user_id"):
+        return jsonify({"error": "bot_user_id required"}), 400
+
+    bot_user_id = data["bot_user_id"]
+
+    # Cannot follow yourself
+    if user_id == bot_user_id:
+        return jsonify({"error": "Cannot follow your own bot"}), 400
+
+    sb = get_client()
+
+    # Verify bot exists and is public
+    bot_check = (
+        sb.table("mybot_settings")
+        .select("is_public")
+        .eq("user_id", bot_user_id)
+        .limit(1)
+        .execute()
+    )
+    if not bot_check.data:
+        return jsonify({"error": "Bot not found"}), 404
+    if not bot_check.data[0].get("is_public"):
+        return jsonify({"error": "This bot is private"}), 403
+
+    # Insert follow (handle duplicate gracefully)
+    try:
+        sb.table("mybot_follows").upsert(
+            {"user_id": user_id, "bot_user_id": bot_user_id},
+            on_conflict="user_id,bot_user_id",
+        ).execute()
+    except Exception:
+        # Already following — treat as success
+        pass
+
+    logger.info(f"User {user_id} followed bot {bot_user_id}")
+    return jsonify({"status": "followed"})
+
+
+@bp.route("/api/mybot/follow", methods=["DELETE"])
+def unfollow_bot():
+    """Unfollow a bot."""
+    payload = verify_auth_header()
+    if not payload:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    user_id = payload["pid"]
+    data = request.get_json(silent=True)
+    if not data or not data.get("bot_user_id"):
+        return jsonify({"error": "bot_user_id required"}), 400
+
+    bot_user_id = data["bot_user_id"]
+    sb = get_client()
+
+    sb.table("mybot_follows").delete().eq("user_id", user_id).eq("bot_user_id", bot_user_id).execute()
+
+    logger.info(f"User {user_id} unfollowed bot {bot_user_id}")
+    return jsonify({"status": "unfollowed"})
+
+
+@bp.route("/api/mybot/follows", methods=["GET"])
+def get_follows():
+    """Get user's followed bots list."""
+    payload = verify_auth_header()
+    if not payload:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    user_id = payload["pid"]
+    sb = get_client()
+
+    # Get user's follows
+    follows_result = (
+        sb.table("mybot_follows")
+        .select("bot_user_id, created_at")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+
+    follows_data = follows_result.data or []
+    if not follows_data:
+        return jsonify({"follows": []})
+
+    bot_user_ids = [f["bot_user_id"] for f in follows_data]
+
+    # Fetch bot settings
+    bots_result = (
+        sb.table("mybot_settings")
+        .select("bot_name, icon_url, user_id, chat_theme, catchphrase, self_introduction, is_public")
+        .in_("user_id", bot_user_ids)
+        .execute()
+    )
+    bots_map = {b["user_id"]: b for b in (bots_result.data or [])}
+
+    # Fetch owner profiles
+    profiles_result = (
+        sb.table("user_profiles")
+        .select("id, display_name, icon_url, x_account")
+        .in_("id", bot_user_ids)
+        .execute()
+    )
+    profiles_map = {p["id"]: p for p in (profiles_result.data or [])}
+
+    # Build response
+    follows = []
+    for f in follows_data:
+        bid = f["bot_user_id"]
+        bot = bots_map.get(bid, {})
+        owner = profiles_map.get(bid, {})
+        follows.append({
+            "bot_user_id": bid,
+            "bot_name": bot.get("bot_name", ""),
+            "icon_url": bot.get("icon_url"),
+            "chat_theme": bot.get("chat_theme", "default"),
+            "catchphrase": bot.get("catchphrase", ""),
+            "self_introduction": bot.get("self_introduction", ""),
+            "is_public": bot.get("is_public", False),
+            "owner_name": owner.get("display_name", ""),
+            "owner_icon_url": owner.get("icon_url"),
+            "owner_x_account": owner.get("x_account"),
+            "followed_at": f["created_at"],
+        })
+
+    return jsonify({"follows": follows})
 
 
 # ---------------------------------------------------------------------------

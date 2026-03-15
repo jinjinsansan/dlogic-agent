@@ -16,6 +16,7 @@ from api.web_chat import bp as web_chat_bp
 from api.data_api import bp as data_api_bp
 from api.auth import bp as auth_bp
 from api.mybot import bp as mybot_bp
+from api.user import bp as user_bp
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -35,7 +36,7 @@ CORS(flask_app, resources={
             "https://dlogicai.in",
             "http://localhost:3000",  # dev
         ],
-        "methods": ["GET", "POST", "OPTIONS"],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"],
     }
 })
@@ -51,6 +52,9 @@ flask_app.register_blueprint(auth_bp)
 
 # Register MYBOT API blueprint
 flask_app.register_blueprint(mybot_bp)
+
+# Register User API blueprint
+flask_app.register_blueprint(user_bp)
 
 # Prefetch data directory
 PREFETCH_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'prefetch')

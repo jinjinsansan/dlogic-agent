@@ -15,6 +15,7 @@ import time
 import requests
 from flask import Blueprint, request, jsonify
 
+from db.supabase_client import get_client
 from db.user_manager import get_or_create_user
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,29 @@ def verify_auth_header() -> dict | None:
     if not auth.startswith("Bearer "):
         return None
     return _verify_token(auth[7:])
+
+
+# ---------------------------------------------------------------------------
+# Login history
+# ---------------------------------------------------------------------------
+
+def _record_login_history(profile_id: str):
+    """Record a login event to login_history table."""
+    try:
+        ip_address = request.headers.get("X-Forwarded-For", request.remote_addr or "")
+        # Take the first IP if X-Forwarded-For has multiple
+        if "," in ip_address:
+            ip_address = ip_address.split(",")[0].strip()
+        user_agent = request.headers.get("User-Agent", "")[:500]
+
+        sb = get_client()
+        sb.table("login_history").insert({
+            "user_id": profile_id,
+            "ip_address": ip_address,
+            "user_agent": user_agent,
+        }).execute()
+    except Exception:
+        logger.exception(f"Failed to record login history for {profile_id}")
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +176,9 @@ def line_login():
     # Create session token
     token = _create_token(profile_id, line_user_id, display_name)
 
+    # Record login history
+    _record_login_history(profile_id)
+
     logger.info(f"LINE Login success: {display_name} ({line_user_id[:10]}...)")
 
     return jsonify({
@@ -204,6 +231,10 @@ def liff_login():
         return jsonify({"error": "ユーザー登録エラー"}), 500
 
     token = _create_token(profile_id, line_user_id, display_name)
+
+    # Record login history
+    _record_login_history(profile_id)
+
     logger.info(f"LIFF Login success: {display_name} ({line_user_id[:10]}...)")
 
     return jsonify({
