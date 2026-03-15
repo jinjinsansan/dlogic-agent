@@ -7,6 +7,7 @@ import json
 import logging
 import threading
 import time
+from datetime import datetime
 
 from flask import request
 
@@ -21,6 +22,7 @@ from linebot.v3.messaging import (
 
 from agent.mybot_chat import run_mybot_agent
 from agent.engine import format_tool_notification
+from config import TELEGRAM_BOT_TOKEN, ADMIN_TELEGRAM_CHAT_ID
 from db.supabase_client import get_client
 from db.encryption import decrypt_value
 from db.redis_client import get_redis
@@ -31,6 +33,10 @@ _redis = get_redis()
 _HISTORY_TTL = 3 * 3600  # 3 hours
 _HISTORY_MAX = 20
 _TOOL_NOTICE_DELAY = 5
+
+# Inquiry mode key prefix
+_INQUIRY_MODE_PREFIX = "mybot:inquiry_mode:"
+_INQUIRY_MODE_TTL = 300  # 5 minutes
 
 
 # ---------------------------------------------------------------------------
@@ -245,6 +251,121 @@ def _process_message(
 
 
 # ---------------------------------------------------------------------------
+# Inquiry mode helpers
+# ---------------------------------------------------------------------------
+
+def _get_inquiry_mode_key(user_id: str, sender_id: str) -> str:
+    return f"{_INQUIRY_MODE_PREFIX}{user_id}:{sender_id}"
+
+
+def _is_inquiry_mode(user_id: str, sender_id: str) -> bool:
+    if not _redis:
+        return False
+    try:
+        return _redis.exists(_get_inquiry_mode_key(user_id, sender_id)) > 0
+    except Exception:
+        return False
+
+
+def _set_inquiry_mode(user_id: str, sender_id: str):
+    if _redis:
+        try:
+            _redis.setex(_get_inquiry_mode_key(user_id, sender_id), _INQUIRY_MODE_TTL, "1")
+        except Exception:
+            pass
+
+
+def _clear_inquiry_mode(user_id: str, sender_id: str):
+    if _redis:
+        try:
+            _redis.delete(_get_inquiry_mode_key(user_id, sender_id))
+        except Exception:
+            pass
+
+
+def _send_mybot_inquiry(
+    user_id: str,
+    sender_id: str,
+    sender_name: str,
+    bot_name: str,
+    content: str,
+    access_token: str,
+):
+    """Save MYBOT inquiry to Supabase and notify admin via Telegram."""
+    import requests as http_req
+    from datetime import timezone, timedelta
+    jst = timezone(timedelta(hours=9))
+
+    sb = get_client()
+    now = datetime.now(jst)
+
+    # Save to mybot_inquiries table
+    inquiry_id = None
+    try:
+        row = {
+            "bot_owner_id": user_id,
+            "bot_name": bot_name,
+            "sender_line_id": sender_id,
+            "sender_name": sender_name,
+            "content": content,
+            "status": "open",
+        }
+        res = sb.table("mybot_inquiries").insert(row).execute()
+        if res.data:
+            inquiry_id = res.data[0]["id"]
+    except Exception:
+        logger.exception("Failed to save MYBOT inquiry")
+
+    # Telegram notification
+    text = (
+        f"📩 [MYBOT問い合わせ]\n"
+        f"━━━━━━━━━━━━\n"
+    )
+    if inquiry_id:
+        text += f"ID: #{inquiry_id}\n"
+    text += (
+        f"BOT: {bot_name}\n"
+        f"BOTオーナー: {user_id[:8]}...\n"
+        f"ユーザー: {sender_name}\n"
+        f"内容: {content}\n"
+        f"時刻: {now.strftime('%Y-%m-%d %H:%M')} JST\n\n"
+        f"/resolve_mybot {inquiry_id} で対応"
+    )
+
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        http_req.post(url, json={
+            "chat_id": ADMIN_TELEGRAM_CHAT_ID,
+            "text": text,
+        }, timeout=10)
+        logger.info(f"MYBOT inquiry #{inquiry_id} sent to admin Telegram")
+    except Exception:
+        logger.exception("Failed to send MYBOT inquiry to Telegram")
+
+    # Confirm to user
+    _push(access_token, sender_id,
+          f"Dlogic運営本部にお問い合わせを送信しました！\n\n"
+          f"内容: {content[:100]}\n\n"
+          f"運営から回答がありましたらこちらでお知らせします。")
+
+
+def _get_sender_name(access_token: str, sender_id: str) -> str:
+    """Get LINE user display name via Messaging API."""
+    import requests as http_req
+    try:
+        resp = http_req.get(
+            f"https://api.line.me/v2/bot/profile/{sender_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=5,
+        )
+        if resp.status_code == 200:
+            return resp.json().get("displayName", "不明")
+    except Exception:
+        pass
+    return "不明"
+
+
+# ---------------------------------------------------------------------------
 # Webhook entry point
 # ---------------------------------------------------------------------------
 
@@ -308,6 +429,8 @@ def handle_mybot_webhook(user_id: str):
         logger.exception(f"Failed to load MYBOT settings for user_id={user_id}")
         bot_settings = {}
 
+    bot_name = bot_settings.get("bot_name", "MYBOT")
+
     for event in events:
         event_type = event.get("type")
 
@@ -323,7 +446,35 @@ def handle_mybot_webhook(user_id: str):
             if not sender_id or not user_text:
                 continue
 
-            # Reply immediately with thinking indicator
+            # --- Inquiry mode: user is composing an inquiry ---
+            if _is_inquiry_mode(user_id, sender_id):
+                _clear_inquiry_mode(user_id, sender_id)
+
+                if user_text in ("キャンセル", "やめる", "cancel"):
+                    _reply(access_token, reply_token, "お問い合わせをキャンセルしました。")
+                    continue
+
+                # Send inquiry
+                sender_name = _get_sender_name(access_token, sender_id)
+                _reply(access_token, reply_token, "お問い合わせを送信中...")
+                _send_mybot_inquiry(
+                    user_id, sender_id, sender_name,
+                    bot_name, user_text, access_token,
+                )
+                continue
+
+            # --- Rich menu keyword: inquiry ---
+            if user_text in ("Dlogic運営に問い合わせ", "問い合わせしたい", "お問い合わせ"):
+                _set_inquiry_mode(user_id, sender_id)
+                _reply(
+                    access_token, reply_token,
+                    "Dlogic運営本部へお問い合わせですね！\n\n"
+                    "お問い合わせ内容をメッセージで送ってください。\n"
+                    "（キャンセルする場合は「キャンセル」と送信）"
+                )
+                continue
+
+            # --- Normal message: reply with thinking + run agent ---
             _reply(access_token, reply_token, "考え中...")
 
             # Process in background thread

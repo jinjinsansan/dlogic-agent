@@ -665,6 +665,130 @@ async def resolve_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     )
 
 
+async def mybot_inquiries_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """List open MYBOT inquiries."""
+    if not _is_admin(update):
+        await update.message.reply_text("⛔ 管理者のみ使用可能です。")
+        return
+
+    sb = get_supabase()
+    res = sb.table("mybot_inquiries") \
+        .select("id, bot_name, sender_name, content, created_at") \
+        .eq("status", "open") \
+        .order("created_at", desc=False) \
+        .limit(20) \
+        .execute()
+
+    if not res.data:
+        await update.message.reply_text("✅ MYBOT未対応の問い合わせはありません。")
+        return
+
+    text = f"📩 MYBOT問い合わせ ({len(res.data)}件)\n━━━━━━━━━━━━━━━\n\n"
+    for item in res.data:
+        created = item["created_at"][:16].replace("T", " ")
+        content = item["content"][:50]
+        text += f"#{item['id']} [{item['bot_name']}] {item['sender_name']}\n"
+        text += f"  {content}\n"
+        text += f"  {created}\n\n"
+    text += "対応完了: /resolve_mybot <ID> [メッセージ]"
+    await update.message.reply_text(text)
+
+
+async def resolve_mybot_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Resolve a MYBOT inquiry and notify user via their BOT's LINE channel.
+
+    Usage: /resolve_mybot <id> [message]
+    """
+    if not _is_admin(update):
+        await update.message.reply_text("⛔ 管理者のみ使用可能です。")
+        return
+
+    if not context.args:
+        await update.message.reply_text("使い方: /resolve_mybot <ID> [メッセージ]")
+        return
+
+    try:
+        inquiry_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("IDは数値で指定してください。")
+        return
+
+    admin_note = " ".join(context.args[1:]) if len(context.args) > 1 else ""
+
+    sb = get_supabase()
+    res = sb.table("mybot_inquiries") \
+        .select("*") \
+        .eq("id", inquiry_id) \
+        .limit(1) \
+        .execute()
+
+    if not res.data:
+        await update.message.reply_text(f"ID #{inquiry_id} のMYBOT問い合わせが見つかりません。")
+        return
+
+    inquiry = res.data[0]
+    if inquiry["status"] == "resolved":
+        await update.message.reply_text(f"#{inquiry_id} は既に対応済みです。")
+        return
+
+    # Update status
+    from datetime import datetime, timezone
+    sb.table("mybot_inquiries") \
+        .update({
+            "status": "resolved",
+            "admin_note": admin_note,
+            "resolved_at": datetime.now(timezone.utc).isoformat(),
+        }) \
+        .eq("id", inquiry_id) \
+        .execute()
+
+    # Notify user via the BOT owner's LINE channel
+    sender_line_id = inquiry.get("sender_line_id")
+    bot_owner_id = inquiry.get("bot_owner_id")
+    sender_name = inquiry.get("sender_name", "")
+    bot_name = inquiry.get("bot_name", "MYBOT")
+    notified = False
+
+    if sender_line_id and bot_owner_id:
+        try:
+            from db.encryption import decrypt_value
+            ch_res = sb.table("mybot_line_channels") \
+                .select("access_token_enc") \
+                .eq("user_id", bot_owner_id) \
+                .limit(1) \
+                .execute()
+
+            if ch_res.data:
+                access_token = decrypt_value(ch_res.data[0]["access_token_enc"])
+
+                if admin_note:
+                    msg = (
+                        f"Dlogic運営本部から回答が届きました！\n\n"
+                        f"━━━━━━━━━━━━━━━\n"
+                        f"{admin_note}\n"
+                        f"━━━━━━━━━━━━━━━\n\n"
+                        f"他にもご質問があればお気軽にどうぞ！"
+                    )
+                else:
+                    msg = (
+                        f"Dlogic運営本部がお問い合わせを確認しました！\n\n"
+                        f"また何かありましたらお気軽にどうぞ！"
+                    )
+
+                from bot.mybot_line_handler import _push as mybot_push
+                mybot_push(access_token, sender_line_id, msg)
+                notified = True
+        except Exception:
+            logger.warning(f"Failed to notify MYBOT user for inquiry #{inquiry_id}")
+
+    await update.message.reply_text(
+        f"✅ MYBOT #{inquiry_id} を対応済みにしました。\n"
+        f"BOT: {bot_name}\n"
+        f"ユーザー: {sender_name}\n"
+        f"LINE通知: {'送信済み' if notified else '失敗'}"
+    )
+
+
 async def activate_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Activate ALL waitlisted users."""
     if not _is_admin(update):
@@ -802,6 +926,8 @@ def create_app() -> Application:
     app.add_handler(CommandHandler("activate_all", activate_all_command))
     app.add_handler(CommandHandler("inquiries", inquiries_command))
     app.add_handler(CommandHandler("resolve", resolve_command))
+    app.add_handler(CommandHandler("mybot_inquiries", mybot_inquiries_command))
+    app.add_handler(CommandHandler("resolve_mybot", resolve_mybot_command))
 
     # Inline button callback handler
     app.add_handler(CallbackQueryHandler(handle_callback))

@@ -130,6 +130,12 @@ def save_settings():
         "jockey_weight": data.get("jockey_weight", 30),
         "item_weights": data.get("item_weights", DEFAULT_ITEM_WEIGHTS),
         "is_public": data.get("is_public", False),
+        "prediction_style": data.get("prediction_style", "balanced"),
+        "analysis_depth": data.get("analysis_depth", "standard"),
+        "bet_suggestion": data.get("bet_suggestion", "basic"),
+        "risk_level": data.get("risk_level", "moderate"),
+        "analysis_focus": data.get("analysis_focus", "general"),
+        "custom_instructions": (data.get("custom_instructions") or "")[:500],
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -146,6 +152,12 @@ def save_settings():
             "is_public": old["is_public"],
             "description": old.get("description", ""),
             "icon_url": old.get("icon_url"),
+            "prediction_style": old.get("prediction_style", "balanced"),
+            "analysis_depth": old.get("analysis_depth", "standard"),
+            "bet_suggestion": old.get("bet_suggestion", "basic"),
+            "risk_level": old.get("risk_level", "moderate"),
+            "analysis_focus": old.get("analysis_focus", "general"),
+            "custom_instructions": old.get("custom_instructions", ""),
         }
         sb.table("mybot_settings_history").insert({
             "user_id": user_id,
@@ -235,6 +247,12 @@ def restore_settings():
                 "is_public": old["is_public"],
                 "description": old.get("description", ""),
                 "icon_url": old.get("icon_url"),
+                "prediction_style": old.get("prediction_style", "balanced"),
+                "analysis_depth": old.get("analysis_depth", "standard"),
+                "bet_suggestion": old.get("bet_suggestion", "basic"),
+                "risk_level": old.get("risk_level", "moderate"),
+                "analysis_focus": old.get("analysis_focus", "general"),
+                "custom_instructions": old.get("custom_instructions", ""),
             },
             "label": "復元前の自動バックアップ",
         }).execute()
@@ -249,6 +267,12 @@ def restore_settings():
         "item_weights": snapshot.get("item_weights", DEFAULT_ITEM_WEIGHTS),
         "is_public": snapshot.get("is_public", False),
         "description": snapshot.get("description", ""),
+        "prediction_style": snapshot.get("prediction_style", "balanced"),
+        "analysis_depth": snapshot.get("analysis_depth", "standard"),
+        "bet_suggestion": snapshot.get("bet_suggestion", "basic"),
+        "risk_level": snapshot.get("risk_level", "moderate"),
+        "analysis_focus": snapshot.get("analysis_focus", "general"),
+        "custom_instructions": snapshot.get("custom_instructions", ""),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     # Restore icon_url if present in snapshot
@@ -547,6 +571,18 @@ def line_connect():
     sb.table("mybot_line_channels").upsert(row, on_conflict="user_id").execute()
 
     logger.info(f"LINE channel connected for user {user_id} (channel_id={channel_id})")
+
+    # Auto-set rich menu (non-blocking, best-effort)
+    try:
+        from scripts.setup_mybot_richmenu import setup_mybot_richmenu
+        rm_id = setup_mybot_richmenu(access_token)
+        if rm_id:
+            logger.info(f"MYBOT rich menu set for user {user_id}: {rm_id}")
+        else:
+            logger.warning(f"MYBOT rich menu setup failed for user {user_id}")
+    except Exception:
+        logger.exception(f"MYBOT rich menu setup error for user {user_id}")
+
     return jsonify({
         "status": "connected",
         "bot_name": bot_info.get("displayName"),

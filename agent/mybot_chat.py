@@ -27,6 +27,21 @@ _MYBOT_PROMPT_TEMPLATE = """あなたは「{bot_name}」。ユーザーが作成
 ## 口調
 {tone_desc}
 
+## 予想スタイル
+{prediction_style_desc}
+
+## 分析の深さ
+{analysis_depth_desc}
+
+## 馬券提案
+{bet_suggestion_desc}
+
+## リスク志向
+{risk_level_desc}
+
+## 分析の重点
+{analysis_focus_desc}
+{custom_instructions_section}
 ## 予想エンジン
 お前が使うのは「IMLogic」エンジン。ユーザーがカスタマイズした12項目のウェイトで予想を出す。
 通常のDlogic/Ilogic/ViewLogic/MetaLogicではなく、IMLogicの結果を表示する。
@@ -79,6 +94,45 @@ TONE_MAP = {
     "hakata": "博多弁。「ばい」「たい」「よかよ」「〜と？」等。",
 }
 
+# Prediction style
+PREDICTION_STYLE_MAP = {
+    "balanced": "バランス型。データと直感を両立させた総合的な予想を出す。",
+    "data_heavy": "データ重視型。数字・統計・過去走の裏付けを徹底的に示す。根拠のないことは言わない。",
+    "intuition": "直感・穴馬型。人気薄の中から光る馬を見つけ出す。オッズの歪みや盲点を突く。",
+    "honmei": "本命党。人気馬を軸にした堅実な予想。的中率重視。無理な穴狙いはしない。",
+}
+
+# Analysis depth
+ANALYSIS_DEPTH_MAP = {
+    "concise": "簡潔に結論を出す。理由は1〜2行で端的に。長い分析は不要。",
+    "standard": "適度な分析。各馬の注目ポイントを簡潔に触れる。",
+    "detailed": "詳細分析。各馬の過去走・血統・適性・展開を丁寧に解説する。初心者にもわかりやすく。",
+}
+
+# Bet suggestion style
+BET_SUGGESTION_MAP = {
+    "none": "馬券の買い方は提案しない。ランキングのみ。",
+    "basic": "基本的な馬券パターン（単勝・複勝・ワイド）を軽く提案する。",
+    "detailed": "具体的な馬券戦略を提案する。三連複・三連単のフォーメーション、資金配分まで言及。",
+}
+
+# Risk level
+RISK_LEVEL_MAP = {
+    "safe": "安全志向。堅い予想を心がける。大穴は避ける。的中率を最優先。",
+    "moderate": "中間。本命寄りだが、妙味のある馬も拾う。",
+    "aggressive": "攻め。高配当を積極的に狙う。穴馬を上位に入れることを恐れない。",
+}
+
+# Analysis focus
+ANALYSIS_FOCUS_MAP = {
+    "general": "特に偏りなく全般的に分析する。",
+    "speed": "スピード指数・タイム分析を重視。ラップ・上がり3Fに注目。",
+    "bloodline": "血統分析を重視。種牡馬・母父の適性、ファミリーラインに注目。",
+    "jockey": "騎手分析を重視。騎手のコース適性、乗り替わり効果、リーディング順位に注目。",
+    "pace": "展開予想を重視。隊列・ペース・脚質の有利不利を中心に分析。",
+    "track": "馬場・コース適性を重視。内外の有利不利、馬場状態の影響を中心に。",
+}
+
 
 def _format_mybot_footer(tools_used: list[str], bot_settings: dict) -> str:
     """MYBOT用フッター: get_predictionsをIMLogicラベルに差し替える."""
@@ -122,10 +176,34 @@ def _build_mybot_system_prompt(bot_settings: dict, user_context: str = "") -> st
     if tone not in TONE_MAP:
         tone_desc = tone
 
+    # New style fields
+    ps = bot_settings.get("prediction_style", "balanced")
+    ad = bot_settings.get("analysis_depth", "standard")
+    bs = bot_settings.get("bet_suggestion", "basic")
+    rl = bot_settings.get("risk_level", "moderate")
+    af = bot_settings.get("analysis_focus", "general")
+    ci = (bot_settings.get("custom_instructions") or "").strip()
+
+    prediction_style_desc = PREDICTION_STYLE_MAP.get(ps, ps)
+    analysis_depth_desc = ANALYSIS_DEPTH_MAP.get(ad, ad)
+    bet_suggestion_desc = BET_SUGGESTION_MAP.get(bs, bs)
+    risk_level_desc = RISK_LEVEL_MAP.get(rl, rl)
+    analysis_focus_desc = ANALYSIS_FOCUS_MAP.get(af, af)
+
+    custom_instructions_section = ""
+    if ci:
+        custom_instructions_section = f"\n## オーナーからの特別指示\n{ci}\n"
+
     prompt = _MYBOT_PROMPT_TEMPLATE.format(
         bot_name=bot_name,
         personality_desc=personality_desc,
         tone_desc=tone_desc,
+        prediction_style_desc=prediction_style_desc,
+        analysis_depth_desc=analysis_depth_desc,
+        bet_suggestion_desc=bet_suggestion_desc,
+        risk_level_desc=risk_level_desc,
+        analysis_focus_desc=analysis_focus_desc,
+        custom_instructions_section=custom_instructions_section,
     )
 
     # Add date
