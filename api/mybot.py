@@ -24,10 +24,16 @@ from flask import Blueprint, request, jsonify, Response
 from api.auth import verify_auth_header
 from db.encryption import encrypt_value, decrypt_value
 from db.supabase_client import get_client
+from db.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
 
 bp = Blueprint("mybot", __name__)
+
+_redis = get_redis()
+_INQUIRY_MODE_PREFIX = "mybot:inquiry_mode:web:"
+_INQUIRY_MODE_TTL = 300  # 5 minutes
+_INQUIRY_KEYWORDS = {"Dlogic運営に問い合わせ", "問い合わせしたい", "お問い合わせ"}
 
 # Default IMLogic weights
 DEFAULT_ITEM_WEIGHTS = {
@@ -383,15 +389,116 @@ def get_public_bot(bot_user_id):
 
 
 # ---------------------------------------------------------------------------
+# MYBOT Web Inquiry helpers
+# ---------------------------------------------------------------------------
+
+def _inquiry_key(user_lid: str, bot_user_id: str) -> str:
+    return f"{_INQUIRY_MODE_PREFIX}{user_lid}:{bot_user_id}"
+
+
+def _is_web_inquiry_mode(user_lid: str, bot_user_id: str) -> bool:
+    if not _redis:
+        return False
+    try:
+        return _redis.exists(_inquiry_key(user_lid, bot_user_id)) > 0
+    except Exception:
+        return False
+
+
+def _set_web_inquiry_mode(user_lid: str, bot_user_id: str):
+    if _redis:
+        try:
+            _redis.setex(_inquiry_key(user_lid, bot_user_id), _INQUIRY_MODE_TTL, "1")
+        except Exception:
+            pass
+
+
+def _clear_web_inquiry_mode(user_lid: str, bot_user_id: str):
+    if _redis:
+        try:
+            _redis.delete(_inquiry_key(user_lid, bot_user_id))
+        except Exception:
+            pass
+
+
+def _send_web_inquiry(bot_user_id: str, bot_name: str, sender_name: str, sender_lid: str, content: str):
+    """Save inquiry to Supabase and notify admin via Telegram."""
+    from datetime import timedelta
+    from config import TELEGRAM_BOT_TOKEN, ADMIN_TELEGRAM_CHAT_ID
+
+    sb = get_client()
+    jst = timezone(timedelta(hours=9))
+    now = datetime.now(jst)
+
+    inquiry_id = None
+    try:
+        row = {
+            "bot_owner_id": bot_user_id,
+            "bot_name": bot_name,
+            "sender_line_id": sender_lid,
+            "sender_name": sender_name,
+            "content": content,
+            "status": "open",
+        }
+        res = sb.table("mybot_inquiries").insert(row).execute()
+        if res.data:
+            inquiry_id = res.data[0]["id"]
+    except Exception:
+        logger.exception("Failed to save web MYBOT inquiry")
+
+    # Telegram notification
+    text = f"📩 [MYBOT問い合わせ (Web)]\n━━━━━━━━━━━━\n"
+    if inquiry_id:
+        text += f"ID: #{inquiry_id}\n"
+    text += (
+        f"BOT: {bot_name}\n"
+        f"BOTオーナー: {bot_user_id[:8]}...\n"
+        f"ユーザー: {sender_name}\n"
+        f"内容: {content}\n"
+        f"時刻: {now.strftime('%Y-%m-%d %H:%M')} JST\n\n"
+        f"/resolve_mybot {inquiry_id} で対応"
+    )
+
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        http_requests.post(url, json={
+            "chat_id": ADMIN_TELEGRAM_CHAT_ID,
+            "text": text,
+        }, timeout=10)
+        logger.info(f"Web MYBOT inquiry #{inquiry_id} sent to admin Telegram")
+    except Exception:
+        logger.exception("Failed to send web MYBOT inquiry to Telegram")
+
+    return inquiry_id
+
+
+def _sse_text_response(text: str, session_id: str = ""):
+    """Return SSE response with a simple text message (no agent loop)."""
+    def generate():
+        yield f"data: {json.dumps({'type': 'text', 'content': text}, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'session_id': session_id}, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ---------------------------------------------------------------------------
 # MYBOT Chat (SSE)
 # ---------------------------------------------------------------------------
 
 @bp.route("/api/mybot/chat", methods=["POST"])
 def mybot_chat():
-    """SSE streaming chat for MYBOT — uses user's IMLogic weights."""
-    payload = verify_auth_header()
-    if not payload:
-        return jsonify({"error": "Unauthorized"}), 401
+    """SSE streaming chat for MYBOT — uses user's IMLogic weights.
+
+    Supports both authenticated and anonymous access:
+    - Authenticated: full features including inquiry system
+    - Anonymous: public bots only, session_id-based sessions
+    """
+    payload = verify_auth_header()  # None if not logged in (anonymous OK)
 
     data = request.get_json(silent=True)
     if not data:
@@ -402,8 +509,13 @@ def mybot_chat():
         return jsonify({"error": "Empty message"}), 400
 
     session_id = data.get("session_id", str(uuid.uuid4()))
-    # bot_user_id: whose bot settings to use (own or public bot)
-    bot_user_id = data.get("bot_user_id", payload["pid"])
+    bot_user_id = data.get("bot_user_id", "")
+
+    if not bot_user_id:
+        if payload:
+            bot_user_id = payload["pid"]
+        else:
+            return jsonify({"error": "bot_user_id is required"}), 400
 
     # Load bot settings
     sb = get_client()
@@ -412,27 +524,60 @@ def mybot_chat():
         return jsonify({"error": "Bot not found. Create your bot first."}), 404
 
     bot_settings = bot_result.data[0]
+    is_owner = payload and payload["pid"] == bot_user_id
 
-    # If not owner, check public
-    if bot_user_id != payload["pid"] and not bot_settings.get("is_public"):
+    # Anonymous or non-owner must use public bots only
+    if not is_owner and not bot_settings.get("is_public"):
         return jsonify({"error": "This bot is private"}), 403
+
+    # Identity: authenticated user or anonymous session
+    user_lid = payload["lid"] if payload else f"anon_{session_id}"
+    user_name = payload.get("name", "Webユーザー") if payload else "匿名ユーザー"
+    bot_name = bot_settings.get("bot_name", "MYBOT")
+
+    # --- Inquiry mode handling ---
+    if _is_web_inquiry_mode(user_lid, bot_user_id):
+        _clear_web_inquiry_mode(user_lid, bot_user_id)
+        if message in ("キャンセル", "やめる", "戻る"):
+            return _sse_text_response("お問い合わせをキャンセルしました。", session_id)
+        # Send inquiry
+        _send_web_inquiry(bot_user_id, bot_name, user_name, user_lid, message)
+        return _sse_text_response(
+            f"Dlogic運営本部にお問い合わせを送信しました！\n\n"
+            f"内容: {message[:100]}\n\n"
+            f"運営から回答がありましたらお知らせします。",
+            session_id,
+        )
+
+    if message in _INQUIRY_KEYWORDS:
+        _set_web_inquiry_mode(user_lid, bot_user_id)
+        return _sse_text_response(
+            "Dlogic運営本部へお問い合わせですね！\n\n"
+            "お問い合わせ内容をメッセージで送ってください。\n"
+            "（「キャンセル」で取り消せます）",
+            session_id,
+        )
 
     from agent.engine import TOOL_LABELS, trim_history
     from agent.mybot_chat import run_mybot_agent
 
     # Session management (similar to web_chat)
     from api.web_chat import _sessions, _cleanup_old_sessions, _SESSION_MAX_AGE
-    from db.user_manager import get_or_create_user
 
     if len(_sessions) > 100:
         _cleanup_old_sessions()
 
-    auth_key = f"mybot_{payload['lid']}_{bot_user_id}"
+    auth_key = f"mybot_{user_lid}_{bot_user_id}"
     if auth_key in _sessions:
         session = _sessions[auth_key]
         session["last_active"] = datetime.now(timezone.utc).timestamp()
     else:
-        profile = get_or_create_user(payload["lid"], payload["name"])
+        if payload:
+            from db.user_manager import get_or_create_user
+            profile = get_or_create_user(payload["lid"], payload["name"])
+        else:
+            # Anonymous profile
+            profile = {"id": f"anon_{session_id}", "display_name": "匿名ユーザー"}
         session = {
             "profile": profile,
             "history": [],
@@ -463,6 +608,9 @@ def mybot_chat():
                 elif chunk_type == "tool":
                     tool_name = chunk.get("name", "")
                     label = TOOL_LABELS.get(tool_name, tool_name)
+                    # MYBOT uses IMLogic, not the 4-engine label
+                    if tool_name == "get_predictions":
+                        label = f"IMLogicエンジン ({bot_name})"
                     yield f"data: {json.dumps({'type': 'tool', 'name': tool_name, 'label': label}, ensure_ascii=False)}\n\n"
 
                 elif chunk_type == "done":

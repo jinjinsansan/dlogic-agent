@@ -180,6 +180,34 @@ def _push(access_token: str, sender_id: str, text: str):
 
 
 # ---------------------------------------------------------------------------
+# MYBOT tool notification (IMLogic label override)
+# ---------------------------------------------------------------------------
+
+def _format_mybot_tool_notification(tool_names: list[str], bot_name: str) -> str:
+    """Like format_tool_notification but replaces get_predictions label with IMLogic."""
+    from agent.engine import TOOL_LABELS, HEAVY_TOOLS
+
+    labels = []
+    for name in tool_names:
+        if name == "get_predictions":
+            labels.append(f"IMLogicエンジン ({bot_name})")
+        else:
+            labels.append(TOOL_LABELS.get(name, name))
+
+    has_heavy = any(name in HEAVY_TOOLS for name in tool_names)
+
+    if has_heavy:
+        msg = "⚡ エンジン起動中...\n"
+        msg += "\n".join(f"  → {l}" for l in labels)
+        msg += "\n少し待ってな（10〜30秒くらい）"
+    else:
+        msg = "🔍 データ取得中...\n"
+        msg += "\n".join(f"  → {l}" for l in labels)
+
+    return msg
+
+
+# ---------------------------------------------------------------------------
 # Background processing
 # ---------------------------------------------------------------------------
 
@@ -194,6 +222,7 @@ def _process_message(
     try:
         history = _load_history(user_id, sender_id)
         profile = {"id": f"mybot_{user_id}_{sender_id}", "display_name": "ユーザー"}
+        _bot_name = bot_settings.get("bot_name", "MYBOT")
 
         notified_tools: set[str] = set()
         pending_notice_tools: list[str] = []
@@ -222,7 +251,7 @@ def _process_message(
                             if not tools:
                                 return
                             try:
-                                notice = format_tool_notification(tools)
+                                notice = _format_mybot_tool_notification(tools, _bot_name)
                                 _push(access_token, sender_id, notice)
                             except Exception:
                                 logger.exception("Failed to send MYBOT tool notification")
