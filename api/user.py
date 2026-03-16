@@ -126,6 +126,16 @@ def get_profile():
             "line_bot_name": mybot_line.get("bot_name") if mybot_line else None,
         }
 
+    # Determine account linking status
+    # Linked = has a real line_user_id (not placeholder) AND line_login_id
+    line_uid = profile.get("line_user_id", "")
+    is_linked = bool(
+        line_uid
+        and not line_uid.startswith("login_")
+        and profile.get("line_login_id")
+    )
+    profile["is_linked"] = is_linked
+
     return jsonify({
         "profile": profile,
         "login_history": login_result.data or [],

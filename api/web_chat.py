@@ -128,6 +128,22 @@ def chat():
     profile = session["profile"]
     history = session["history"]
 
+    # --- Handle 「引き継ぎコード」request (no code provided) → redirect to LINE app ---
+    if message in ("引き継ぎコード", "連携コード", "アカウント連携", "記憶コピー", "記憶コピーコード"):
+        redirect_msg = (
+            "📱 連携コードはLINEアプリのDロジくんから取得してください！\n\n"
+            "① LINEアプリを開く\n"
+            "② Dロジくんに「引き継ぎコード」と送信\n"
+            "③ 届いたコードをマイページに入力\n\n"
+            "Webチャットからは連携コードを取得できません。"
+        )
+        def _redirect_response():
+            yield f"data: {json.dumps({'type': 'text', 'content': redirect_msg}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'session_id': session_id, 'quick_replies': []}, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+        return Response(_redirect_response(), mimetype="text/event-stream",
+                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
     # --- Handle 「引き継ぎ XXXXXX」or「記憶コピー XXXXXX」 ---
     transfer_match = re.match(r"(?:引き継ぎ|記憶コピー)\s+([A-Za-z0-9]{4,8})", message)
     if transfer_match and auth_payload:

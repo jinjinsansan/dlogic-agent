@@ -614,12 +614,14 @@ def handle_message(event: MessageEvent):
         code = _safe_db_call(db_get_transfer_code, profile["id"], default=None)
         if code:
             _reply(event.reply_token,
-                   f"お前の記憶コピーコードはこれだ👇\n\n"
-                   f"🔑 記憶コピー {code}\n\n"
-                   "他のBOTにこのコードを送ると、\n"
-                   "ここでの記憶や成績がコピーされるぜ！\n\n"
-                   "逆に他のBOTのコードをここで送れば、\n"
-                   "そっちの記憶をこっちにコピーできるぞ！\n\n"
+                   f"お前の連携コードはこれだ👇\n\n"
+                   f"🔑 {code}\n\n"
+                   "━━━━━━━━━━━━\n"
+                   "📱 Webマイページで入力してね！\n"
+                   "━━━━━━━━━━━━\n\n"
+                   "Webのマイページにこのコードを\n"
+                   "入力すると、記憶・予想・回収率が\n"
+                   "すべて統合されるぜ！（1回でOK）\n\n"
                    "※ コードは他の人に教えないように！")
         else:
             _reply(event.reply_token, "コードが取得できなかった。もう一回試してくれ！")
