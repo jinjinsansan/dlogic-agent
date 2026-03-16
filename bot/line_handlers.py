@@ -279,18 +279,20 @@ def get_quick_reply(tools_used: list[str]) -> QuickReply | None:
             QuickReplyItem(action=MessageAction(label="🧬 血統分析", text="血統は？")),
             QuickReplyItem(action=MessageAction(label="📈 過去走", text="過去の成績は？")),
             QuickReplyItem(action=MessageAction(label="🗣️ 関係者情報", text="関係者情報は？")),
+            QuickReplyItem(action=MessageAction(label="🗳️ みんなの本命", text="みんなの本命比率")),
             QuickReplyItem(action=MessageAction(label="🔥 全部見る", text="全部掘り下げて")),
             QuickReplyItem(action=MessageAction(label="💬 どう思う？", text="お前はどう思う？")),
         ]
 
     elif "get_race_entries" in used_set:
-        # After entry list — prediction + odds + probability + weight + training
+        # After entry list — prediction + odds + probability + weight + training + honmei ratio
         items = [
             QuickReplyItem(action=MessageAction(label="🎯 予想して", text="予想して")),
             QuickReplyItem(action=MessageAction(label="📊 予測勝率", text="予測勝率見せて")),
             QuickReplyItem(action=MessageAction(label="💰 オッズは？", text="オッズ見せて")),
             QuickReplyItem(action=MessageAction(label="⚖️ 馬体重", text="馬体重は？")),
             QuickReplyItem(action=MessageAction(label="🗣️ 関係者情報", text="関係者情報は？")),
+            QuickReplyItem(action=MessageAction(label="🗳️ みんなの本命", text="みんなの本命比率")),
         ]
 
     elif "get_today_races" in used_set:

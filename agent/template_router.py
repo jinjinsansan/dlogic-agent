@@ -41,6 +41,8 @@ _ROUTES: list[tuple[re.Pattern, str, dict]] = [
     (re.compile(r"(予測)?勝率(は|を|見)?"), "odds_probability", {}),
     # Stats (no API needed at all)
     (re.compile(r"(俺の|おれの|自分の)?(成績|的中|回収)"), "my_stats", {}),
+    # Honmei ratio (みんなの本命比率)
+    (re.compile(r"(みんなの|皆の)?(本命比率|本命分布|投票比率)"), "honmei_ratio", {}),
 ]
 
 
@@ -440,6 +442,25 @@ def route_and_respond(
         )
         return {"text": text, "footer": footer, "tools_used": tools_used, "history_entries": history_entries}
 
+    # ── Route: honmei_ratio (みんなの本命比率) ──
+    if route_name == "honmei_ratio":
+        race_id = find_race_id(history) or active_race_id_hint
+        if not race_id:
+            return None
+
+        _ensure_entries_cached(race_id)
+        text = _fmt_honmei_ratio(race_id)
+        tools_used = ["get_honmei_ratio"]
+        footer = format_tools_used_footer(tools_used)
+        history_entries = _build_history_entries(
+            tool_name="get_honmei_ratio",
+            tool_input={"race_id": race_id},
+            tool_result=text,
+            final_text=text,
+        )
+        return {"text": text, "footer": footer, "tools_used": tools_used,
+                "history_entries": history_entries, "active_race_id": race_id}
+
     # ── Analysis routes: fall through to Claude ──
     # race_flow, jockey, bloodline, recent_runs, training
     # These need Claude to interpret and summarize the data
@@ -487,6 +508,74 @@ def _fmt_stats(data: dict) -> str:
         lines.append("レースの本命を登録すれば、結果が出た後に成績が記録されるぜ！")
 
     lines.append("━━━━━━━━")
+    return "\n".join(lines)
+
+
+def _fmt_honmei_ratio(race_id: str) -> str:
+    """Format honmei prediction ratio for a race."""
+    from db.supabase_client import get_client
+    from tools.executor import _race_cache
+
+    sb = get_client()
+
+    # Get all predictions for this race
+    res = sb.table("user_predictions") \
+        .select("horse_number, horse_name") \
+        .eq("race_id", race_id) \
+        .execute()
+
+    predictions = res.data or []
+
+    if not predictions:
+        return "まだこのレースにはみんな本命登録してないみたいだな。\n\n出馬表や予想を見た後に「本命」を選んでくれ！"
+
+    # Count per horse
+    counts: dict[int, dict] = {}
+    for p in predictions:
+        num = p["horse_number"]
+        if num not in counts:
+            counts[num] = {"name": p["horse_name"], "count": 0}
+        counts[num]["count"] += 1
+
+    total = len(predictions)
+
+    # Sort by count descending
+    ranked = sorted(counts.items(), key=lambda x: x[1]["count"], reverse=True)
+
+    # Get race info from cache
+    race_name = ""
+    venue = ""
+    cache = _race_cache.get(race_id, {}).get("entries", {})
+    if cache:
+        race_name = cache.get("race_name", "")
+        venue = cache.get("venue", "")
+
+    # Format
+    lines = []
+    header = f"【{venue} {race_name}】" if race_name else f"【{race_id}】"
+    lines.append(f"📊 みんなの本命比率 {header}")
+    lines.append(f"━━━━━━━━ 投票数: {total}")
+    lines.append("")
+
+    bar_chars = "█▉▊▋▌▍▎▏"
+    for i, (num, info) in enumerate(ranked):
+        pct = info["count"] / total * 100
+        # Visual bar (max 10 blocks)
+        bar_len = int(pct / 10)
+        bar = "█" * bar_len
+        if bar_len < 10:
+            remainder = (pct / 10) - bar_len
+            idx = int(remainder * 8)
+            if idx > 0 and idx < len(bar_chars):
+                bar += bar_chars[idx]
+
+        medal = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else "  "
+        lines.append(f"{medal} {num}番 {info['name']}")
+        lines.append(f"   {bar} {pct:.0f}%（{info['count']}票）")
+
+    lines.append("")
+    lines.append("━━━━━━━━")
+
     return "\n".join(lines)
 
 
