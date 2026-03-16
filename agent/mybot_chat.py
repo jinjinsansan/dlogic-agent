@@ -12,7 +12,7 @@ from agent.engine import (
     call_claude, build_system_prompt, extract_text, get_tool_blocks,
     trim_history,
 )
-from agent.chat_core import get_web_quick_replies
+from agent.chat_core import get_mybot_web_quick_replies
 from config import MAX_TOOL_TURNS, DLOGIC_API_URL
 from tools.executor import execute_tool
 
@@ -74,13 +74,13 @@ _MYBOT_PROMPT_TEMPLATE = """あなたは「{bot_name}」。ユーザーが作成
 通常のDlogic/Ilogic/ViewLogic/MetaLogicではなく、IMLogicの結果を表示する。
 
 ## 予想表示
-━━━ {bot_name}の予想 ━━━
+━━ {bot_name}の予想 ━━
 S 6.馬名
 A 3.馬名
 B 11.馬名
 C 7.馬名
 C 1.馬名
-━━━━━━━━━━
+━━━━━━━━
 
 ## ツール使用（即行動）
 確認質問せず即ツール呼び出し:
@@ -360,16 +360,27 @@ def run_mybot_agent(
     """
     profile_id = profile["id"]
 
-    # Build user context (minimal for MYBOT)
+    # Build user context from Supabase (shared with Dlogic)
     user_context = ""
+    if not profile_id.startswith("anon_"):
+        try:
+            from db.user_manager import (
+                get_memories as db_get_memories,
+                build_user_context as db_build_user_context,
+            )
+            memories = db_get_memories(profile_id)
+            user_context = db_build_user_context(profile, memories)
+        except Exception as e:
+            logger.warning(f"Failed to load user context: {e}")
+
     if active_race_id_hint:
         from tools.executor import _race_cache
         race_info = _race_cache.get(active_race_id_hint, {}).get("entries", {})
         race_name = race_info.get("race_name", "")
         venue = race_info.get("venue", "")
         if race_name or venue:
-            user_context = (
-                f"【現在のレース】{venue} {race_name} (race_id: {active_race_id_hint})\n"
+            user_context += (
+                f"\n\n【現在のレース】{venue} {race_name} (race_id: {active_race_id_hint})\n"
                 f"ユーザーが「予想は？」「展開は？」等と聞いた場合、このレースについて答えろ。"
             )
 
@@ -446,5 +457,5 @@ def run_mybot_agent(
         "tools_used": tools_used,
         "active_race_id": active_race_id,
         "history": history,
-        "quick_replies": get_web_quick_replies(tools_used),
+        "quick_replies": get_mybot_web_quick_replies(tools_used),
     }

@@ -78,6 +78,58 @@ def get_web_quick_replies(tools_used: list[str]) -> list[dict]:
 
     return items
 
+
+def get_mybot_web_quick_replies(tools_used: list[str]) -> list[dict]:
+    """Generate context-appropriate quick replies for MYBOT WebApp (engine-independent tools only)."""
+    used_set = set(tools_used)
+
+    post_prediction_tools = {
+        "get_odds_probability", "get_realtime_odds", "get_horse_weights",
+        "get_stable_comments", "get_training_comments",
+    }
+
+    items = []
+
+    if used_set & post_prediction_tools:
+        if "get_odds_probability" not in used_set:
+            items.append({"label": "📊 予測勝率", "text": "予測勝率見せて"})
+        if "get_realtime_odds" not in used_set:
+            items.append({"label": "💰 オッズ", "text": "オッズ見せて"})
+        if "get_horse_weights" not in used_set:
+            items.append({"label": "⚖️ 馬体重", "text": "馬体重は？"})
+        if "get_stable_comments" not in used_set:
+            items.append({"label": "🗣️ 関係者情報", "text": "関係者情報は？"})
+        if "get_training_comments" not in used_set:
+            items.append({"label": "📝 調教評価", "text": "調教評価は？"})
+        items.append({"label": "💬 どう思う？", "text": "お前はどう思う？"})
+
+    elif "get_predictions" in used_set:
+        items = [
+            {"label": "📊 予測勝率", "text": "予測勝率見せて"},
+            {"label": "💰 オッズ", "text": "オッズ見せて"},
+            {"label": "⚖️ 馬体重", "text": "馬体重は？"},
+            {"label": "🗣️ 関係者情報", "text": "関係者情報は？"},
+            {"label": "📝 調教評価", "text": "調教評価は？"},
+            {"label": "💬 どう思う？", "text": "お前はどう思う？"},
+        ]
+
+    elif "get_race_entries" in used_set:
+        items = [
+            {"label": "🎯 予想して", "text": "予想して"},
+            {"label": "📊 予測勝率", "text": "予測勝率見せて"},
+            {"label": "💰 オッズ", "text": "オッズ見せて"},
+            {"label": "⚖️ 馬体重", "text": "馬体重は？"},
+            {"label": "🗣️ 関係者情報", "text": "関係者情報は？"},
+        ]
+
+    elif "get_today_races" in used_set:
+        items = [
+            {"label": "🏇 メインレース", "text": "メインレースの出馬表見せて"},
+        ]
+
+    return items
+
+
 # Tools that should skip memory extraction
 _MEMORY_SKIP_TOOLS = {
     "get_today_races", "get_race_entries", "get_predictions",

@@ -16,7 +16,13 @@ import requests
 from flask import Blueprint, request, jsonify
 
 from db.supabase_client import get_client
-from db.user_manager import get_or_create_user
+from db.user_manager import (
+    get_or_create_user,
+    get_or_create_user_by_login,
+    link_login_to_profile,
+    merge_profiles,
+)
+from config import ADMIN_PROFILE_IDS
 
 logger = logging.getLogger(__name__)
 
@@ -165,28 +171,32 @@ def line_login():
         logger.error(f"LINE profile fetch error: {e}")
         return jsonify({"error": "LINEプロフィール取得エラー"}), 500
 
-    # Upsert user in Supabase (same function as LINE Bot)
+    # Upsert user in Supabase using LINE Login ID
     try:
-        profile = get_or_create_user(line_user_id, display_name)
+        profile = get_or_create_user_by_login(line_user_id, display_name)
         profile_id = profile["id"]
     except Exception as e:
         logger.error(f"Supabase user creation error: {e}")
         return jsonify({"error": "ユーザー登録エラー"}), 500
 
+    # Use the DB profile's display_name (respects custom_name flag)
+    db_display_name = profile.get("display_name", display_name)
+
     # Create session token
-    token = _create_token(profile_id, line_user_id, display_name)
+    token = _create_token(profile_id, line_user_id, db_display_name)
 
     # Record login history
     _record_login_history(profile_id)
 
-    logger.info(f"LINE Login success: {display_name} ({line_user_id[:10]}...)")
+    logger.info(f"LINE Login success: {db_display_name} ({line_user_id[:10]}...)")
 
     return jsonify({
         "token": token,
         "user": {
             "id": profile_id,
-            "display_name": display_name,
+            "display_name": db_display_name,
             "status": profile.get("status", "active"),
+            "is_admin": profile_id in ADMIN_PROFILE_IDS,
         },
     })
 
@@ -222,27 +232,31 @@ def liff_login():
         logger.error(f"LIFF profile fetch error: {e}")
         return jsonify({"error": "LINEプロフィール取得エラー"}), 500
 
-    # Upsert user in Supabase
+    # Upsert user in Supabase using LINE Login ID
     try:
-        profile = get_or_create_user(line_user_id, display_name)
+        profile = get_or_create_user_by_login(line_user_id, display_name)
         profile_id = profile["id"]
     except Exception as e:
         logger.error(f"Supabase user creation error: {e}")
         return jsonify({"error": "ユーザー登録エラー"}), 500
 
-    token = _create_token(profile_id, line_user_id, display_name)
+    # Use the DB profile's display_name (respects custom_name flag)
+    db_display_name = profile.get("display_name", display_name)
+
+    token = _create_token(profile_id, line_user_id, db_display_name)
 
     # Record login history
     _record_login_history(profile_id)
 
-    logger.info(f"LIFF Login success: {display_name} ({line_user_id[:10]}...)")
+    logger.info(f"LIFF Login success: {db_display_name} ({line_user_id[:10]}...)")
 
     return jsonify({
         "token": token,
         "user": {
             "id": profile_id,
-            "display_name": display_name,
+            "display_name": db_display_name,
             "status": profile.get("status", "active"),
+            "is_admin": profile_id in ADMIN_PROFILE_IDS,
         },
     })
 
@@ -254,9 +268,89 @@ def me():
     if not payload:
         return jsonify({"error": "Unauthorized"}), 401
 
+    # Fetch current display_name from DB (token may have stale name)
+    profile_id = payload["pid"]
+    display_name = payload["name"]
+    try:
+        sb = get_client()
+        res = sb.table("user_profiles").select("display_name").eq("id", profile_id).limit(1).execute()
+        if res.data:
+            display_name = res.data[0].get("display_name", display_name)
+    except Exception:
+        pass  # Fall back to token name
+
     return jsonify({
         "user": {
-            "id": payload["pid"],
-            "display_name": payload["name"],
+            "id": profile_id,
+            "display_name": display_name,
+            "is_admin": profile_id in ADMIN_PROFILE_IDS,
+        },
+    })
+
+
+@bp.route("/api/chatauth/link", methods=["POST"])
+def link_account():
+    """Link web account to existing Dlogic LINE Bot account using transfer code.
+
+    POST body: {"transfer_code": "ABC123"}
+    """
+    payload = verify_auth_header()
+    if not payload:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_json(silent=True)
+    if not data or not data.get("transfer_code"):
+        return jsonify({"error": "引き継ぎコードを入力してください"}), 400
+
+    transfer_code = data["transfer_code"].strip().upper()
+    line_login_id = payload["lid"]
+    current_profile_id = payload["pid"]
+
+    sb = get_client()
+
+    # Find the Dlogic profile by transfer code
+    res = sb.table("user_profiles") \
+        .select("*") \
+        .eq("transfer_code", transfer_code) \
+        .limit(1) \
+        .execute()
+
+    if not res.data:
+        return jsonify({"error": "引き継ぎコードが見つかりません"}), 404
+
+    target_profile = res.data[0]
+    target_id = target_profile["id"]
+
+    # Already the same profile
+    if target_id == current_profile_id:
+        return jsonify({"message": "既に連携済みです", "user": {
+            "id": target_id,
+            "display_name": target_profile["display_name"],
+        }})
+
+    # Check if target already has a different line_login_id
+    if target_profile.get("line_login_id") and target_profile["line_login_id"] != line_login_id:
+        return jsonify({"error": "このアカウントは既に別のWebアカウントと連携されています"}), 409
+
+    # Link: set line_login_id on the target (Dlogic) profile
+    if not link_login_to_profile(target_id, line_login_id):
+        return jsonify({"error": "連携に失敗しました"}), 500
+
+    # Merge: move data from current web profile to target, delete web profile
+    if current_profile_id != target_id:
+        merge_profiles(target_id, current_profile_id)
+
+    # Issue new token pointing to the merged profile
+    new_token = _create_token(target_id, line_login_id, target_profile["display_name"])
+
+    logger.info(f"Account linked: web={current_profile_id[:10]}... -> dlogic={target_id[:10]}...")
+
+    return jsonify({
+        "message": "連携完了！Dロジくんのデータが引き継がれました",
+        "token": new_token,
+        "user": {
+            "id": target_id,
+            "display_name": target_profile["display_name"],
+            "visit_count": target_profile["visit_count"],
         },
     })

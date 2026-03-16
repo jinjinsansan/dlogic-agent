@@ -21,9 +21,13 @@ import requests
 # Setup path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from dotenv import load_dotenv
+load_dotenv(".env.local")
+
 from scrapers.race_result import fetch_race_result
 from scrapers.nar import NAR_VENUES
 from db.engine_stats import save_hit_rate
+from db.result_manager import save_race_result, get_race_result, judge_predictions, update_user_stats_for_race
 
 logging.basicConfig(
     level=logging.INFO,
@@ -132,6 +136,25 @@ def process_race(race: dict, date_str: str) -> int:
     result_set = {result_1st, result_2nd, result_3rd}
 
     formatted_date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+
+    # Also save to race_results table (needed for recovery rate calculation)
+    existing = get_race_result(race_id)
+    if not existing:
+        try:
+            save_race_result(
+                race_id=race_id,
+                winner_number=result["winner_number"],
+                winner_name=result["winner_name"],
+                win_payout=result["win_payout"],
+                result_json=result["result_json"],
+                race_name=race.get("race_name", ""),
+                venue=venue,
+                race_date=formatted_date,
+                race_type=race_type,
+            )
+            logger.info(f"  Saved to race_results: {race_id} winner={result['winner_number']} payout={result['win_payout']}")
+        except Exception:
+            logger.exception(f"  Failed to save race_result for {race_id}")
     saved = 0
 
     # Step 3: Compare each engine
@@ -169,7 +192,70 @@ def process_race(race: dict, date_str: str) -> int:
         logger.info(f"  {mark} {eng}: pred={top3_pred} vs result=[{result_1st},{result_2nd},{result_3rd}]")
         saved += 1
 
+    # Step 4: Judge user predictions + MYBOT predictions for this race
+    try:
+        judgement = judge_predictions(race_id)
+        if "error" not in judgement and judgement.get("total_predictions", 0) > 0:
+            wins = len(judgement["winners"])
+            total_preds = judgement["total_predictions"]
+            logger.info(f"  User predictions: {wins}/{total_preds} correct")
+            update_user_stats_for_race(race_id)
+    except Exception:
+        pass  # No user predictions for this race is normal
+
+    try:
+        _judge_mybot_predictions(
+            race_id=race_id,
+            winner_number=result_1st,
+            win_payout=result.get("win_payout", 0),
+        )
+    except Exception:
+        pass  # No MYBOT predictions for this race is normal
+
     return saved
+
+
+def _judge_mybot_predictions(race_id: str, winner_number: int, win_payout: int) -> None:
+    """Judge all MYBOT predictions for a given race and update stats."""
+    from db.supabase_client import get_client
+    sb = get_client()
+
+    res = sb.table("mybot_predictions").select("*").eq("race_id", race_id).execute()
+    if not res.data:
+        return
+
+    for pred in res.data:
+        bot_user_id = pred["bot_user_id"]
+        is_win = pred["s_rank_horse_number"] == winner_number
+        payout = win_payout if is_win else 0
+
+        stats_res = sb.table("mybot_stats").select("*").eq("bot_user_id", bot_user_id).execute()
+        if stats_res.data:
+            stats = stats_res.data[0]
+            total_predictions = stats["total_predictions"] + 1
+            total_wins = stats["total_wins"] + (1 if is_win else 0)
+            total_payout = stats["total_payout"] + payout
+        else:
+            total_predictions = 1
+            total_wins = 1 if is_win else 0
+            total_payout = payout
+
+        total_bet = total_predictions * 100
+        recovery_rate = (total_payout / total_bet * 100) if total_bet > 0 else 0
+        win_rate = (total_wins / total_predictions * 100) if total_predictions > 0 else 0
+
+        sb.table("mybot_stats").upsert({
+            "bot_user_id": bot_user_id,
+            "total_predictions": total_predictions,
+            "total_wins": total_wins,
+            "total_payout": total_payout,
+            "recovery_rate": round(recovery_rate, 1),
+            "win_rate": round(win_rate, 1),
+            "last_updated_at": datetime.now(JST).isoformat(),
+        }, on_conflict="bot_user_id").execute()
+
+        mark = "HIT" if is_win else "MISS"
+        logger.info(f"  MYBOT {bot_user_id[:8]}...: S={pred['s_rank_horse_number']} {mark} (recovery={recovery_rate:.1f}%)")
 
 
 def main():

@@ -101,7 +101,7 @@ def _fmt_entries(data: dict) -> str:
     if venue or distance:
         info_parts = [p for p in [venue, distance, condition] if p]
         lines.append(" / ".join(info_parts))
-    lines.append("━━━━━━━━━━")
+    lines.append("━━━━━━━━")
 
     circled = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱"
     for i, e in enumerate(entries):
@@ -114,7 +114,7 @@ def _fmt_entries(data: dict) -> str:
             odds_str = f" {e['odds']}倍"
         lines.append(f"{circle} {num}.{name}（{jockey}）{odds_str}")
 
-    lines.append("━━━━━━━━━━")
+    lines.append("━━━━━━━━")
     return "\n".join(lines)
 
 
@@ -125,7 +125,7 @@ def _fmt_predictions(data: dict) -> str:
         return "予想データがまだないみたいだ。"
 
     rank_labels = {1: "S", 2: "A", 3: "B", 4: "C", 5: "C"}
-    lines = ["━━━ 予想結果 ━━━"]
+    lines = ["━━ 予想結果 ━━"]
 
     track_adjusted = data.get("track_adjusted", False)
     track_condition = data.get("track_condition", "")
@@ -169,7 +169,7 @@ def _fmt_odds(data: dict) -> str:
                 name_map[str(num)] = horses[i]
 
     is_prefetch = data.get("_prefetch", False)
-    lines = ["━━━ オッズ ━━━"]
+    lines = ["━━ オッズ ━━"]
     if is_prefetch:
         lines.append("※前日オッズ（リアルタイムは発売開始後に更新）")
         lines.append("")
@@ -179,7 +179,7 @@ def _fmt_odds(data: dict) -> str:
         name = name_map.get(num, "")
         circle = circled[i] if i < len(circled) else f"{i+1}"
         lines.append(f"{circle} {num}.{name} {val}倍")
-    lines.append("━━━━━━━━━━")
+    lines.append("━━━━━━━━")
     return "\n".join(lines)
 
 
@@ -200,12 +200,12 @@ def _fmt_weights(data: dict) -> str:
             if i < len(horses):
                 name_map[str(num)] = horses[i]
 
-    lines = ["━━━ 馬体重 ━━━"]
+    lines = ["━━ 馬体重 ━━"]
     for num in sorted(weights.keys(), key=lambda x: int(x)):
         name = name_map.get(num, "")
         w = weights[num]
         lines.append(f"{num}.{name} {w}kg")
-    lines.append("━━━━━━━━━━")
+    lines.append("━━━━━━━━")
     return "\n".join(lines)
 
 
@@ -217,7 +217,7 @@ def _fmt_odds_probability(data: dict) -> str:
 
     sorted_probs = sorted(probs, key=lambda x: -x.get("win_prob", 0))
 
-    lines = ["━━━ 予測勝率 ━━━"]
+    lines = ["━━ 予測勝率 ━━"]
     lines.append("")
     lines.append("馬番  馬名")
     lines.append("  勝率     複勝率")
@@ -243,7 +243,7 @@ def _fmt_odds_probability(data: dict) -> str:
         lines.append(f"    勝 {wp:5.1f}%  複 {pp:5.1f}%")
 
     lines.append("")
-    lines.append("━━━━━━━━━━")
+    lines.append("━━━━━━━━")
     lines.append("※オッズから算出した統計的確率")
     return "\n".join(lines)
 
@@ -454,7 +454,7 @@ def _fmt_stats(data: dict) -> str:
     stats = data.get("stats")
     predictions = data.get("pending_predictions", [])
 
-    lines = ["━━━ お前の成績 ━━━"]
+    lines = ["━━ お前の成績 ━━"]
 
     if stats:
         total = stats.get("total_picks", 0)
@@ -486,7 +486,7 @@ def _fmt_stats(data: dict) -> str:
     if not stats and not predictions:
         lines.append("レースの本命を登録すれば、結果が出た後に成績が記録されるぜ！")
 
-    lines.append("━━━━━━━━━━")
+    lines.append("━━━━━━━━")
     return "\n".join(lines)
 
 

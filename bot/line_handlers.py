@@ -31,6 +31,7 @@ from db.user_manager import (
     clear_memories as db_clear_memories,
     get_transfer_code as db_get_transfer_code,
     transfer_account as db_transfer_account,
+    sync_profiles as db_sync_profiles,
     is_maintenance_mode,
     get_maintenance_message,
     get_user_status,
@@ -605,6 +606,72 @@ def handle_message(event: MessageEvent):
         _reply(event.reply_token, text)
         return
 
+    if user_text in ("引き継ぎコード", "連携コード", "アカウント連携", "記憶コピー", "記憶コピーコード"):
+        profile = _get_profile(user_id, display_name)
+        if profile.get("fallback"):
+            _reply(event.reply_token, "今ちょっと不安定みたいだ。少し時間おいてくれ！")
+            return
+        code = _safe_db_call(db_get_transfer_code, profile["id"], default=None)
+        if code:
+            _reply(event.reply_token,
+                   f"お前の記憶コピーコードはこれだ👇\n\n"
+                   f"🔑 記憶コピー {code}\n\n"
+                   "他のBOTにこのコードを送ると、\n"
+                   "ここでの記憶や成績がコピーされるぜ！\n\n"
+                   "逆に他のBOTのコードをここで送れば、\n"
+                   "そっちの記憶をこっちにコピーできるぞ！\n\n"
+                   "※ コードは他の人に教えないように！")
+        else:
+            _reply(event.reply_token, "コードが取得できなかった。もう一回試してくれ！")
+        return
+
+    # Handle transfer code input: 「引き継ぎ XXXXXX」or「記憶コピー XXXXXX」
+    transfer_match = re.match(r"(?:引き継ぎ|記憶コピー)\s+([A-Za-z0-9]{4,8})", user_text)
+    if transfer_match:
+        input_code = transfer_match.group(1).strip().upper()
+        profile = _get_profile(user_id, display_name)
+        if profile.get("fallback"):
+            _reply(event.reply_token, "今ちょっと不安定みたいだ。少し時間おいてくれ！")
+            return
+
+        # Don't let user link to their own code
+        own_code = profile.get("transfer_code", "")
+        if own_code and own_code == input_code:
+            _reply(event.reply_token, "それはお前自身のコードだぜ！別のアカウントのコードを入力してくれ。")
+            return
+
+        # Look up the profile with this code
+        from db.supabase_client import get_client
+        sb = get_client()
+        try:
+            res = sb.table("user_profiles") \
+                .select("*") \
+                .eq("transfer_code", input_code) \
+                .limit(1) \
+                .execute()
+        except Exception:
+            _reply(event.reply_token, "ごめん、エラーが出ちゃった。もう一回試してくれ！")
+            return
+
+        if not res.data:
+            _reply(event.reply_token, "そのコードは見つからなかった。もう一回確認してくれ！")
+            return
+
+        source_profile = res.data[0]
+        source_id = source_profile["id"]
+
+        # Bidirectional sync: copy memories/stats between both profiles
+        synced = _safe_db_call(db_sync_profiles, profile["id"], source_id, default=False)
+        if synced:
+            _profile_cache.pop(user_id, None)  # Clear cache to refresh profile fields
+            _reply(event.reply_token,
+                   "🎉 アカウント連携完了！\n\n"
+                   "データを統合したぜ。記憶や成績が引き継がれたぞ！")
+            logger.info(f"LINE Bot account sync: {profile['id'][:10]}... <-> {source_id[:10]}...")
+        else:
+            _reply(event.reply_token, "ごめん、連携でエラーが出ちゃった。もう一回試してくれ！")
+        return
+
     if user_text in ("記憶リセット", "忘れて"):
         profile = _get_profile(user_id, display_name)
         if profile.get("fallback"):
@@ -713,6 +780,10 @@ def handle_message(event: MessageEvent):
                 active_race_id = chunk.get("active_race_id")
                 _save_history(user_id, chunk.get("history", history))
 
+                # Always save active_race_id so next message has context
+                if active_race_id:
+                    _set_active_race(user_id, active_race_id)
+
                 # Integrate honmei into same message to save push quota
                 qr = get_quick_reply(tools_used)
                 used_set = set(tools_used)
@@ -725,7 +796,6 @@ def handle_message(event: MessageEvent):
                         if already_picked == "error":
                             already_picked = True
                     if not already_picked:
-                        _set_active_race(user_id, active_race_id)
                         honmei_qr = get_honmei_quick_reply(active_race_id)
                         if honmei_qr:
                             full_text += (

@@ -693,15 +693,15 @@ def follow_bot():
 
     # Insert follow (handle duplicate gracefully)
     try:
-        sb.table("mybot_follows").upsert(
+        result = sb.table("mybot_follows").upsert(
             {"user_id": user_id, "bot_user_id": bot_user_id},
             on_conflict="user_id,bot_user_id",
         ).execute()
-    except Exception:
-        # Already following — treat as success
-        pass
+        logger.info(f"User {user_id} followed bot {bot_user_id}, result={result.data}")
+    except Exception as e:
+        logger.error(f"Follow upsert failed for user={user_id} bot={bot_user_id}: {e}")
+        return jsonify({"error": "フォローに失敗しました", "detail": str(e)}), 500
 
-    logger.info(f"User {user_id} followed bot {bot_user_id}")
     return jsonify({"status": "followed"})
 
 
@@ -986,6 +986,95 @@ def mybot_chat():
             session_id,
         )
 
+    # --- Transfer code handler for MYBOT Web ---
+    import re as _re
+    _transfer_match = _re.match(r"(?:引き継ぎ|記憶コピー)\s+([A-Za-z0-9]{4,8})", message)
+    if _transfer_match and payload:
+        input_code = _transfer_match.group(1).strip().upper()
+        from db.user_manager import get_or_create_user_by_login as _get_user_link
+        from db.user_manager import sync_profiles as _sync_prof
+        current_profile = _get_user_link(payload["lid"], payload["name"])
+        own_code = current_profile.get("transfer_code", "")
+
+        if own_code and own_code == input_code:
+            return _sse_text_response("それはあなた自身のコードです！別のアカウントのコードを入力してください。", session_id)
+
+        sb = get_client()
+        try:
+            res = sb.table("user_profiles").select("*").eq("transfer_code", input_code).limit(1).execute()
+        except Exception:
+            return _sse_text_response("エラーが発生しました。もう一度試してください。", session_id)
+
+        if not res.data:
+            return _sse_text_response("そのコードは見つかりませんでした。もう一度確認してください。", session_id)
+
+        source = res.data[0]
+        # Bidirectional sync: copy memories/stats between both profiles
+        try:
+            synced = _sync_prof(current_profile["id"], source["id"])
+        except Exception:
+            synced = False
+
+        if synced:
+            # Refresh session profile to pick up synced fields
+            auth_key = f"mybot_{user_lid}_{bot_user_id}"
+            from api.web_chat import _sessions
+            if auth_key in _sessions:
+                try:
+                    refreshed = sb.table("user_profiles").select("*").eq("id", current_profile["id"]).limit(1).execute()
+                    if refreshed.data:
+                        _sessions[auth_key]["profile"] = refreshed.data[0]
+                except Exception:
+                    pass
+            return _sse_text_response("🎉 アカウント連携完了！データが統合されました。", session_id)
+        else:
+            return _sse_text_response("連携でエラーが発生しました。もう一度試してください。", session_id)
+
+    # --- Honmei (本命) selection handler for Web ---
+    if message.startswith("本命 ") or message.startswith("本命:"):
+        import re as _re
+        match = _re.match(r"本命[:\s]+(\d+)番?\s*(.*)", message)
+        if match and payload:
+            from db.prediction_manager import record_prediction as _rec_pred
+            from db.user_manager import get_or_create_user_by_login as _get_user
+            horse_number = int(match.group(1))
+            horse_name = match.group(2).strip() or f"{horse_number}番"
+
+            profile = _get_user(payload["lid"], payload["name"])
+            # Find race_id from session
+            from api.web_chat import _sessions
+            auth_key = f"mybot_{user_lid}_{bot_user_id}"
+            race_id = None
+            if auth_key in _sessions:
+                race_id = _sessions[auth_key].get("pending_honmei_race") or _sessions[auth_key].get("active_race_id")
+
+            if race_id and not profile.get("fallback"):
+                venue = ""
+                try:
+                    from tools.executor import _race_cache
+                    if race_id in _race_cache and "entries" in _race_cache[race_id]:
+                        venue = _race_cache[race_id]["entries"].get("venue", "")
+                    _rec_pred(
+                        user_profile_id=profile["id"],
+                        race_id=race_id,
+                        horse_number=horse_number,
+                        horse_name=horse_name,
+                        race_name="",
+                        venue=venue,
+                    )
+                    if auth_key in _sessions:
+                        _sessions[auth_key].pop("pending_honmei_race", None)
+                    return _sse_text_response(
+                        f"👊 {horse_number}番 {horse_name} を本命で登録したぜ！\n\n"
+                        "みんなの予想に追加したからな。結果出たら回収率も計算してやるよ。",
+                        session_id,
+                    )
+                except Exception:
+                    logger.exception("Failed to record MYBOT web honmei")
+                    return _sse_text_response("ごめん、登録でエラーが出ちゃった。もう一回試してくれ！", session_id)
+            else:
+                return _sse_text_response("レースを先に見てから本命を選んでくれ！", session_id)
+
     from agent.engine import TOOL_LABELS, trim_history
     from agent.mybot_chat import run_mybot_agent
 
@@ -1001,8 +1090,8 @@ def mybot_chat():
         session["last_active"] = datetime.now(timezone.utc).timestamp()
     else:
         if payload:
-            from db.user_manager import get_or_create_user
-            profile = get_or_create_user(payload["lid"], payload["name"])
+            from db.user_manager import get_or_create_user_by_login
+            profile = get_or_create_user_by_login(payload["lid"], payload["name"])
         else:
             # Anonymous profile
             profile = {"id": f"anon_{session_id}", "display_name": "匿名ユーザー"}
@@ -1046,11 +1135,52 @@ def mybot_chat():
                     if chunk.get("active_race_id"):
                         session["active_race_id"] = chunk["active_race_id"]
 
-                    yield f"data: {json.dumps({'type': 'text', 'content': chunk['text']}, ensure_ascii=False)}\n\n"
+                    full_text = chunk["text"]
+                    quick_replies = chunk.get("quick_replies", [])
+                    tools_used = chunk.get("tools_used", [])
+                    active_race_id = chunk.get("active_race_id")
+
+                    # Honmei (みんなの予想) for Web
+                    used_set = set(tools_used)
+                    if used_set & {"get_race_entries", "get_predictions"} and active_race_id:
+                        profile_id = profile.get("id", "")
+                        if not profile_id.startswith("anon_"):
+                            try:
+                                from db.prediction_manager import check_prediction as _check_pred
+                                already_picked = _check_pred(profile_id, active_race_id)
+                            except Exception:
+                                already_picked = True
+                            if not already_picked:
+                                session["pending_honmei_race"] = active_race_id
+                                # Build honmei quick replies from race cache
+                                from tools.executor import _race_cache
+                                if active_race_id in _race_cache and "entries" in _race_cache[active_race_id]:
+                                    entries = _race_cache[active_race_id]["entries"]
+                                    horses = entries.get("horses", [])
+                                    horse_numbers = entries.get("horse_numbers", [])
+                                    if horses and horse_numbers:
+                                        honmei_items = []
+                                        for i in range(min(len(horses), len(horse_numbers), 18)):
+                                            num = horse_numbers[i]
+                                            name = horses[i]
+                                            honmei_items.append({
+                                                "label": f"{num}.{name}"[:20],
+                                                "text": f"本命 {num}番 {name}",
+                                            })
+                                        if honmei_items:
+                                            full_text += (
+                                                "\n\n━━━━━━━━\n"
+                                                "📢 みんなの予想\n"
+                                                "━━━━━━━━\n\n"
+                                                "お前の本命を教えてくれ！👇"
+                                            )
+                                            quick_replies = honmei_items
+
+                    yield f"data: {json.dumps({'type': 'text', 'content': full_text}, ensure_ascii=False)}\n\n"
                     done_data = {
                         "type": "done",
                         "session_id": session_id,
-                        "quick_replies": chunk.get("quick_replies", []),
+                        "quick_replies": quick_replies,
                     }
                     yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
 

@@ -22,7 +22,13 @@ from flask import Blueprint, request, Response, jsonify
 from agent.chat_core import run_agent
 from agent.engine import TOOL_LABELS, trim_history
 from api.auth import verify_auth_header
-from db.user_manager import get_or_create_user, build_user_context as db_build_user_context
+import re
+
+from db.user_manager import (
+    get_or_create_user, get_or_create_user_by_login,
+    build_user_context as db_build_user_context,
+    sync_profiles,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +52,8 @@ def _get_or_create_session(session_id: str, auth_payload: dict | None = None) ->
             session["last_active"] = datetime.now(timezone.utc).timestamp()
             return session
 
-        # Create authenticated session with Supabase profile
-        profile = get_or_create_user(auth_payload["lid"], auth_payload["name"])
+        # Create authenticated session with Supabase profile (LINE Login ID)
+        profile = get_or_create_user_by_login(auth_payload["lid"], auth_payload["name"])
         session = {
             "profile": profile,
             "history": [],
@@ -121,6 +127,57 @@ def chat():
     session = _get_or_create_session(session_id, auth_payload)
     profile = session["profile"]
     history = session["history"]
+
+    # --- Handle 「引き継ぎ XXXXXX」or「記憶コピー XXXXXX」 ---
+    transfer_match = re.match(r"(?:引き継ぎ|記憶コピー)\s+([A-Za-z0-9]{4,8})", message)
+    if transfer_match and auth_payload:
+        input_code = transfer_match.group(1).strip().upper()
+        own_code = profile.get("transfer_code", "")
+
+        if own_code and own_code == input_code:
+            msg = "それはあなた自身のコードです！別のアカウントのコードを入力してください。"
+        else:
+            from db.supabase_client import get_client
+            sb = get_client()
+            try:
+                res = sb.table("user_profiles") \
+                    .select("*") \
+                    .eq("transfer_code", input_code) \
+                    .limit(1) \
+                    .execute()
+            except Exception:
+                res = type("R", (), {"data": []})()
+
+            if not res.data:
+                msg = "そのコードは見つかりませんでした。もう一度確認してください。"
+            else:
+                source = res.data[0]
+                # Bidirectional sync: copy memories/stats between both profiles
+                try:
+                    synced = sync_profiles(profile["id"], source["id"])
+                except Exception:
+                    synced = False
+
+                if synced:
+                    # Refresh session profile to pick up synced fields
+                    try:
+                        refreshed = sb.table("user_profiles").select("*").eq("id", profile["id"]).limit(1).execute()
+                        if refreshed.data:
+                            session["profile"] = refreshed.data[0]
+                    except Exception:
+                        pass
+                    msg = "🎉 アカウント連携完了！データが統合されました。"
+                    logger.info(f"Web account sync: {profile['id'][:10]}... <-> {source['id'][:10]}...")
+                else:
+                    msg = "連携でエラーが発生しました。もう一度試してください。"
+
+        def _link_response():
+            yield f"data: {json.dumps({'type': 'text', 'content': msg}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'session_id': session_id, 'quick_replies': []}, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return Response(_link_response(), mimetype="text/event-stream",
+                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     # Trim history to prevent unbounded growth
     history = trim_history(history)

@@ -37,8 +37,8 @@ def _find_font():
 
 
 def generate_mybot_image(output_path: str, x_account: str | None = None):
-    """Generate MYBOT rich menu image (2500x1686, 2 rows x 3 columns)."""
-    W, H = 2500, 1686
+    """Generate MYBOT rich menu image (2500x843 compact, 2 rows x 3 columns)."""
+    W, H = 2500, 843
     COLS, ROWS = 3, 2
 
     cell_w = W // COLS
@@ -53,27 +53,23 @@ def generate_mybot_image(output_path: str, x_account: str | None = None):
 
     font_path = _find_font()
     if font_path:
-        main_font = ImageFont.truetype(font_path, 60)
-        sub_font = ImageFont.truetype(font_path, 34)
-        brand_font = ImageFont.truetype(font_path, 24)
+        main_font = ImageFont.truetype(font_path, 42)
+        sub_font = ImageFont.truetype(font_path, 24)
+        brand_font = ImageFont.truetype(font_path, 18)
     else:
         main_font = ImageFont.load_default()
         sub_font = main_font
         brand_font = main_font
 
-    # Row 1: JRA, 地方, お問い合わせ
-    # Row 2: MYBOTとは？, X (作成者), Dlogic TOP
-    x_label = f"@{x_account}" if x_account else "X"
     buttons = [
         ("JRA", "今日のJRA"),
         ("NAR", "今日の地方"),
         ("CONTACT", "お問い合わせ"),
         ("MYBOT", "MYBOTとは？"),
-        ("X", x_label),
+        ("X", "作成者X"),
         ("SITE", "Dlogic TOP"),
     ]
 
-    # Color map for sub labels
     sub_colors = {
         "JRA": ACCENT,
         "NAR": ACCENT,
@@ -91,39 +87,39 @@ def generate_mybot_image(output_path: str, x_account: str | None = None):
         x1 = x0 + cell_w
         y1 = y0 + cell_h
 
-        m = 6
+        m = 4
         draw.rectangle([x0 + m, y0 + m, x1 - m, y1 - m], fill=CARD_BG)
 
         # Accent bars (left + bottom)
         bar_color = sub_colors.get(sub, ACCENT)
-        draw.rectangle([x0 + m, y0 + m, x0 + m + 5, y1 - m], fill=bar_color)
-        draw.rectangle([x0 + m, y1 - m - 3, x1 - m, y1 - m], fill=bar_color)
+        draw.rectangle([x0 + m, y0 + m, x0 + m + 4, y1 - m], fill=bar_color)
+        draw.rectangle([x0 + m, y1 - m - 2, x1 - m, y1 - m], fill=bar_color)
 
         # Sub label
         sub_bbox = draw.textbbox((0, 0), sub, font=sub_font)
         sub_w = sub_bbox[2] - sub_bbox[0]
         sub_x = x0 + (cell_w - sub_w) // 2
-        sub_y = y0 + cell_h // 2 - 70
+        sub_y = y0 + cell_h // 2 - 48
         draw.text((sub_x, sub_y), sub, fill=bar_color, font=sub_font)
 
         # Main label
         bbox = draw.textbbox((0, 0), label, font=main_font)
         tw = bbox[2] - bbox[0]
         tx = x0 + (cell_w - tw) // 2
-        ty = y0 + cell_h // 2 + 5
+        ty = y0 + cell_h // 2 + 2
         draw.text((tx, ty), label, fill="#ffffff", font=main_font)
 
     # Grid separators
     for c in range(1, COLS):
         x = c * cell_w
-        draw.line([(x, 0), (x, H)], fill=ACCENT, width=3)
-    draw.line([(0, cell_h), (W, cell_h)], fill=ACCENT, width=3)
+        draw.line([(x, 0), (x, H)], fill=ACCENT, width=2)
+    draw.line([(0, cell_h), (W, cell_h)], fill=ACCENT, width=2)
 
     # Outer border
-    draw.rectangle([0, 0, W - 1, H - 1], outline=ACCENT, width=3)
+    draw.rectangle([0, 0, W - 1, H - 1], outline=ACCENT, width=2)
 
     # Brand watermark
-    draw.text((W - 300, H - 36), "Powered by D-Logic", fill="#333333", font=brand_font)
+    draw.text((W - 240, H - 26), "Powered by D-Logic", fill="#333333", font=brand_font)
 
     img.save(output_path, "PNG")
     return output_path
@@ -157,8 +153,8 @@ def setup_mybot_richmenu(
     except Exception:
         pass  # Non-fatal
 
-    # 3. Create rich menu (2 rows x 3 columns)
-    W, H = 2500, 1686
+    # 3. Create rich menu (compact: 2500x843, 2 rows x 3 columns)
+    W, H = 2500, 843
     cell_w = W // 3
     cell_h = H // 2
 

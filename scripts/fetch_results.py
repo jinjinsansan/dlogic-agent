@@ -13,6 +13,7 @@ Flow:
 """
 
 import argparse
+import json
 import logging
 import re
 import sys
@@ -44,8 +45,13 @@ logger = logging.getLogger(__name__)
 
 JST = timezone(timedelta(hours=9))
 
+PREFETCH_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'prefetch')
+
 # Cache for netkeiba race_id lookups (date_str → {venue-num: netkeiba_id})
 _netkeiba_id_cache: dict[str, dict[str, str]] = {}
+
+# Cache for prefetch data (date_str → {custom_race_id: netkeiba_race_id})
+_prefetch_id_cache: dict[str, dict[str, str]] = {}
 
 
 def _is_custom_race_id(race_id: str) -> bool:
@@ -53,10 +59,44 @@ def _is_custom_race_id(race_id: str) -> bool:
     return bool(re.match(r'^\d{8}-.+?-\d+$', race_id))
 
 
+def _load_prefetch_ids(date_str: str) -> dict[str, str]:
+    """Load race_id → netkeiba_race_id mapping from prefetch JSON.
+
+    Prefetch files are the most reliable source for ID resolution since
+    they are generated at race-time with correct venue/race mappings.
+    """
+    if date_str in _prefetch_id_cache:
+        return _prefetch_id_cache[date_str]
+
+    mapping: dict[str, str] = {}
+    path = os.path.join(PREFETCH_DIR, f"races_{date_str}.json")
+
+    if os.path.exists(path):
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            for race in data.get("races", []):
+                rid = race.get("race_id", "")
+                nk_id = race.get("race_id_netkeiba", "")
+                if rid and nk_id:
+                    mapping[rid] = nk_id
+            logger.info(f"Loaded {len(mapping)} race IDs from prefetch {date_str}")
+        except Exception:
+            logger.exception(f"Failed to load prefetch file: {path}")
+    else:
+        logger.info(f"No prefetch file for {date_str}")
+
+    _prefetch_id_cache[date_str] = mapping
+    return mapping
+
+
 def _resolve_netkeiba_id(race_id: str, race_type: str) -> str | None:
     """Resolve custom race_id (YYYYMMDD-venue-num) to netkeiba race_id.
 
-    Scrapes the race list for the date and matches by venue + race_number.
+    Resolution order:
+    1. Prefetch data (most reliable, no network needed)
+    2. Scraper fallback (fragile, used only if no prefetch)
+
     Returns netkeiba race_id or None if not found.
     """
     m = re.match(r'^(\d{8})-(.+?)-(\d+)$', race_id)
@@ -67,32 +107,41 @@ def _resolve_netkeiba_id(race_id: str, race_type: str) -> str | None:
     venue = m.group(2)
     race_number = int(m.group(3))
 
+    # Method 1: Check prefetch data (preferred)
+    prefetch_ids = _load_prefetch_ids(date_str)
+    if race_id in prefetch_ids:
+        nk_id = prefetch_ids[race_id]
+        logger.info(f"Resolved via prefetch: {race_id} → {nk_id}")
+        return nk_id
+
+    # Method 2: Scraper fallback
     cache_key = f"{date_str}-{race_type}"
 
-    # Check cache
     if cache_key not in _netkeiba_id_cache:
         _netkeiba_id_cache[cache_key] = {}
 
-        # Determine if NAR or JRA based on venue
         is_nar = any(v in venue for v in NAR_VENUES)
 
-        if is_nar:
-            from scrapers.nar import fetch_race_list
-            races = fetch_race_list(date_str, venue_filter=venue)
-        else:
-            from scrapers.jra import fetch_race_list
-            races = fetch_race_list(date_str)
+        try:
+            if is_nar:
+                from scrapers.nar import fetch_race_list
+                races = fetch_race_list(date_str, venue_filter=venue)
+            else:
+                from scrapers.jra import fetch_race_list
+                races = fetch_race_list(date_str)
 
-        for r in races:
-            key = f"{r.venue}-{r.race_number}"
-            _netkeiba_id_cache[cache_key][key] = r.race_id
+            for r in races:
+                key = f"{r.venue}-{r.race_number}"
+                _netkeiba_id_cache[cache_key][key] = r.race_id
 
-        time.sleep(1)  # Be polite to netkeiba
+            time.sleep(1)
+        except Exception:
+            logger.exception(f"Scraper fallback failed for {date_str}")
 
     lookup_key = f"{venue}-{race_number}"
     nk_id = _netkeiba_id_cache[cache_key].get(lookup_key)
     if nk_id:
-        logger.info(f"Resolved {race_id} → {nk_id}")
+        logger.info(f"Resolved via scraper: {race_id} → {nk_id}")
     else:
         logger.warning(f"Could not resolve {race_id} to netkeiba ID (key={lookup_key})")
 

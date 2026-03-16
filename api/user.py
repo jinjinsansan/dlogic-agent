@@ -1,8 +1,9 @@
-"""User profile API — view/update profile, upload icon.
+"""User profile API — view/update profile, upload icon, stats.
 
 GET  /api/user/profile       — Get full user profile
 PUT  /api/user/profile       — Update user profile fields
 POST /api/user/upload-icon   — Upload user avatar icon
+GET  /api/user/stats         — Get user prediction stats & recent results
 """
 
 import logging
@@ -167,6 +168,10 @@ def update_profile():
     if not update:
         return jsonify({"error": "No valid fields to update"}), 400
 
+    # Mark custom name so LINE profile name doesn't overwrite it
+    if "display_name" in update:
+        update["custom_name"] = True
+
     update["last_seen_at"] = datetime.now(timezone.utc).isoformat()
 
     sb = get_client()
@@ -236,3 +241,23 @@ def upload_user_icon():
     except Exception:
         logger.exception(f"User icon upload failed for {user_id}")
         return jsonify({"error": "Upload failed"}), 500
+
+
+@bp.route("/api/user/stats", methods=["GET"])
+def get_stats():
+    """Get user prediction stats and recent results."""
+    payload = verify_auth_header()
+    if not payload:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    user_id = payload["pid"]
+
+    from db.result_manager import get_user_stats, get_user_recent_results
+
+    stats = get_user_stats(user_id)
+    recent = get_user_recent_results(user_id, limit=20)
+
+    return jsonify({
+        "stats": stats,
+        "recent_results": recent,
+    })

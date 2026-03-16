@@ -30,7 +30,7 @@ from agent.response_cache import (
     get as get_cached_response, save as save_cached_response,
     TOOL_QUERY_MAP,
 )
-from config import TELEGRAM_BOT_TOKEN, MAX_TOOL_TURNS, ONBOARDING_TEXT
+from config import TELEGRAM_BOT_TOKEN, MAX_TOOL_TURNS, ONBOARDING_TEXT, ADMIN_TELEGRAM_IDS
 from tools.executor import execute_tool
 from db.user_manager import (
     is_maintenance_mode, set_maintenance, get_maintenance_message,
@@ -38,8 +38,8 @@ from db.user_manager import (
 )
 from db.supabase_client import get_client as get_supabase
 
-# Admin chat ID (jin)
-ADMIN_CHAT_ID = 197618639
+# Admin chat IDs (jin + authorized admins)
+ADMIN_CHAT_ID = 197618639  # kept for backward compat (notification target)
 
 logger = logging.getLogger(__name__)
 
@@ -457,11 +457,18 @@ async def forget_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 # ---------------------------------------------------------------------------
+async def myid_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show user's Telegram ID."""
+    uid = update.effective_user.id
+    await update.message.reply_text(f"あなたのTelegram ID: `{uid}`", parse_mode="Markdown")
+    logger.info(f"/myid from user {uid} ({update.effective_user.first_name})")
+
+
 # Admin commands (Telegram only — for managing LINE Bot)
 # ---------------------------------------------------------------------------
 
 def _is_admin(update: Update) -> bool:
-    return update.effective_user.id == ADMIN_CHAT_ID
+    return update.effective_user.id in ADMIN_TELEGRAM_IDS
 
 
 async def maintenance_on_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -917,6 +924,8 @@ def create_app() -> Application:
     app.add_handler(CommandHandler("reset", reset_command))
     app.add_handler(CommandHandler("memory", memory_command))
     app.add_handler(CommandHandler("forget", forget_command))
+
+    app.add_handler(CommandHandler("myid", myid_command))
 
     # Admin commands (LINE Bot management from Telegram)
     app.add_handler(CommandHandler("maintenance_on", maintenance_on_command))

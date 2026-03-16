@@ -66,28 +66,49 @@ def get_race_result(race_id: str) -> dict | None:
 def get_pending_races(date_str: str = "") -> list[dict]:
     """Get races that have predictions but no results yet.
 
-    Finds race_ids in user_predictions that don't have a 'finished' entry
-    in race_results. Optionally filter by date.
+    Finds race_ids in user_predictions AND mybot_predictions that don't have
+    a 'finished' entry in race_results. Optionally filter by date.
     """
     sb = get_client()
 
-    # Get distinct race_ids from predictions
+    # Get distinct race_ids from user_predictions
     query = sb.table("user_predictions").select("race_id, race_name, venue, race_date, race_type")
     if date_str:
         query = query.eq("race_date", date_str)
 
     pred_res = query.execute()
-    if not pred_res.data:
-        return []
 
     # Deduplicate race_ids
     seen = set()
     races = []
-    for p in pred_res.data:
+    for p in (pred_res.data or []):
         rid = p["race_id"]
         if rid not in seen:
             seen.add(rid)
             races.append(p)
+
+    # Also include mybot_predictions
+    try:
+        mybot_query = sb.table("mybot_predictions").select("race_id, race_name, venue")
+        mybot_res = mybot_query.execute()
+        for p in (mybot_res.data or []):
+            rid = p["race_id"]
+            if rid not in seen:
+                seen.add(rid)
+                # Infer race_type from venue
+                venue = p.get("venue", "")
+                races.append({
+                    "race_id": rid,
+                    "race_name": p.get("race_name", ""),
+                    "venue": venue,
+                    "race_date": None,
+                    "race_type": "nar" if venue in _NAR_VENUE_SET else "jra",
+                })
+    except Exception:
+        logger.warning("Could not query mybot_predictions for pending races")
+
+    if not races:
+        return []
 
     # Check which already have results
     race_ids = list(seen)
@@ -102,6 +123,13 @@ def get_pending_races(date_str: str = "") -> list[dict]:
 
     logger.info(f"Pending races: {len(pending)}/{len(races)} (date={date_str or 'all'})")
     return pending
+
+
+# NAR venues for race_type inference
+_NAR_VENUE_SET = {
+    "大井", "川崎", "船橋", "浦和", "園田", "姫路", "名古屋", "笠松",
+    "金沢", "高知", "佐賀", "盛岡", "水沢", "門別", "帯広",
+}
 
 
 # ---------------------------------------------------------------------------

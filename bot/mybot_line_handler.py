@@ -11,6 +11,8 @@ from datetime import datetime
 
 from flask import request
 
+import re
+
 from linebot.v3.messaging import (
     ApiClient,
     Configuration,
@@ -18,15 +20,23 @@ from linebot.v3.messaging import (
     ReplyMessageRequest,
     PushMessageRequest,
     TextMessage,
+    QuickReply,
+    QuickReplyItem,
+    MessageAction,
 )
 
 from agent.mybot_chat import run_mybot_agent
 from agent.engine import format_tool_notification
+from agent.response_cache import find_race_id
 from config import TELEGRAM_BOT_TOKEN, ADMIN_TELEGRAM_CHAT_ID
 from db.supabase_client import get_client
 from db.encryption import decrypt_value
 from db.redis_client import get_redis
-from db.user_manager import get_user_status
+from db.user_manager import get_user_status, get_or_create_user as db_get_or_create_user
+from db.prediction_manager import (
+    record_prediction as db_record_prediction,
+    check_prediction as db_check_prediction,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +48,178 @@ _TOOL_NOTICE_DELAY = 5
 # Inquiry mode key prefix
 _INQUIRY_MODE_PREFIX = "mybot:inquiry_mode:"
 _INQUIRY_MODE_TTL = 300  # 5 minutes
+
+# Active race tracking (for honmei selection)
+_ACTIVE_RACE_PREFIX = "mybot:active_race:"
+_ACTIVE_RACE_TTL = 3600  # 1 hour
+
+# Profile cache (in-memory, per session)
+_profile_cache: dict[str, dict] = {}
+
+
+def _set_active_race(user_id: str, sender_id: str, race_id: str):
+    if _redis:
+        try:
+            _redis.setex(f"{_ACTIVE_RACE_PREFIX}{user_id}:{sender_id}", _ACTIVE_RACE_TTL, race_id)
+        except Exception:
+            pass
+
+
+def _get_active_race(user_id: str, sender_id: str) -> str | None:
+    if _redis:
+        try:
+            val = _redis.get(f"{_ACTIVE_RACE_PREFIX}{user_id}:{sender_id}")
+            return val.decode() if val else None
+        except Exception:
+            pass
+    return None
+
+
+def _clear_active_race(user_id: str, sender_id: str):
+    if _redis:
+        try:
+            _redis.delete(f"{_ACTIVE_RACE_PREFIX}{user_id}:{sender_id}")
+        except Exception:
+            pass
+
+
+def _has_pending_honmei(user_id: str, sender_id: str, profile_id: str) -> bool:
+    """Check if user has a pending honmei pick."""
+    race_id = _get_active_race(user_id, sender_id)
+    if not race_id:
+        return False
+    try:
+        existing = db_check_prediction(profile_id, race_id)
+        return existing is None
+    except Exception:
+        return False
+
+
+def get_mybot_quick_reply(tools_used: list[str]) -> QuickReply | None:
+    """Get context-appropriate quick reply buttons for MYBOT (engine-independent tools only)."""
+    used_set = set(tools_used)
+
+    # Tools that are post-analysis (already got predictions/odds/etc)
+    post_prediction_tools = {
+        "get_odds_probability", "get_realtime_odds", "get_horse_weights",
+        "get_stable_comments", "get_training_comments",
+    }
+
+    items = []
+
+    if used_set & post_prediction_tools:
+        # After analysis — show remaining engine-independent tools
+        if "get_odds_probability" not in used_set:
+            items.append(QuickReplyItem(action=MessageAction(label="📊 予測勝率", text="予測勝率見せて")))
+        if "get_realtime_odds" not in used_set:
+            items.append(QuickReplyItem(action=MessageAction(label="💰 オッズ", text="オッズ見せて")))
+        if "get_horse_weights" not in used_set:
+            items.append(QuickReplyItem(action=MessageAction(label="⚖️ 馬体重", text="馬体重は？")))
+        if "get_stable_comments" not in used_set:
+            items.append(QuickReplyItem(action=MessageAction(label="🗣️ 関係者情報", text="関係者情報は？")))
+        if "get_training_comments" not in used_set:
+            items.append(QuickReplyItem(action=MessageAction(label="📝 調教評価", text="調教評価は？")))
+        items.append(QuickReplyItem(action=MessageAction(label="💬 どう思う？", text="お前はどう思う？")))
+
+    elif "get_predictions" in used_set:
+        # After IMLogic prediction — deep dive options
+        items = [
+            QuickReplyItem(action=MessageAction(label="📊 予測勝率", text="予測勝率見せて")),
+            QuickReplyItem(action=MessageAction(label="💰 オッズ", text="オッズ見せて")),
+            QuickReplyItem(action=MessageAction(label="⚖️ 馬体重", text="馬体重は？")),
+            QuickReplyItem(action=MessageAction(label="🗣️ 関係者情報", text="関係者情報は？")),
+            QuickReplyItem(action=MessageAction(label="📝 調教評価", text="調教評価は？")),
+            QuickReplyItem(action=MessageAction(label="💬 どう思う？", text="お前はどう思う？")),
+        ]
+
+    elif "get_race_entries" in used_set:
+        # After entry list — prediction + info tools
+        items = [
+            QuickReplyItem(action=MessageAction(label="🎯 予想して", text="予想して")),
+            QuickReplyItem(action=MessageAction(label="📊 予測勝率", text="予測勝率見せて")),
+            QuickReplyItem(action=MessageAction(label="💰 オッズ", text="オッズ見せて")),
+            QuickReplyItem(action=MessageAction(label="⚖️ 馬体重", text="馬体重は？")),
+            QuickReplyItem(action=MessageAction(label="🗣️ 関係者情報", text="関係者情報は？")),
+        ]
+
+    elif "get_today_races" in used_set:
+        # After race list — offer main race
+        items = [
+            QuickReplyItem(action=MessageAction(label="🏇 メインレース", text="メインレースの出馬表見せて")),
+        ]
+
+    if items:
+        return QuickReply(items=items)
+    return None
+
+
+def get_honmei_quick_reply(race_id: str) -> QuickReply | None:
+    """Generate Quick Reply buttons for honmei selection."""
+    from tools.executor import _race_cache, execute_tool
+
+    if race_id not in _race_cache or "entries" not in _race_cache[race_id]:
+        try:
+            execute_tool("get_race_entries", {"race_id": race_id})
+        except Exception:
+            logger.exception(f"Failed to populate entries for honmei: {race_id}")
+
+    if race_id not in _race_cache or "entries" not in _race_cache[race_id]:
+        return None
+
+    entries = _race_cache[race_id]["entries"]
+    horses = entries.get("horses", [])
+    horse_numbers = entries.get("horse_numbers", [])
+    if not horses or not horse_numbers:
+        return None
+
+    items = []
+    for i in range(min(len(horses), len(horse_numbers))):
+        num = horse_numbers[i]
+        name = horses[i]
+        label = f"{num}.{name}"
+        if len(label) > 20:
+            label = f"{num}.{name[:17]}"
+        items.append(QuickReplyItem(
+            action=MessageAction(label=label, text=f"本命 {num}番 {name}")
+        ))
+        if len(items) >= 13:
+            break
+
+    return QuickReply(items=items) if items else None
+
+
+# Honmei blocking: keywords
+_RACE_CHANGE_KEYWORDS = [
+    "他のレース", "別のレース", "次のレース",
+    "船橋", "大井", "川崎", "浦和", "園田", "姫路", "金沢", "名古屋", "笠松", "高知", "佐賀",
+    "中山", "阪神", "東京", "京都", "小倉", "新潟", "福島", "札幌", "函館",
+    "今日のJRA", "今日の地方", "地方競馬", "JRA", "メインレース",
+]
+_SAME_RACE_KEYWORDS = [
+    "予想して", "オッズ", "馬体重", "関係者", "展開", "騎手", "血統", "過去", "直近",
+    "どう思う", "全部", "掘り下げ",
+]
+
+
+def _is_same_race_query(text: str) -> bool:
+    return any(kw in text for kw in _SAME_RACE_KEYWORDS)
+
+
+def _get_mybot_profile(user_id: str, sender_id: str, access_token: str) -> dict:
+    """Get or create a Supabase user profile for a MYBOT LINE user."""
+    cache_key = f"{user_id}:{sender_id}"
+    if cache_key in _profile_cache:
+        return _profile_cache[cache_key]
+
+    display_name = _get_sender_name(access_token, sender_id)
+    try:
+        profile = db_get_or_create_user(sender_id, display_name)
+    except Exception:
+        logger.exception(f"Failed to get/create profile for MYBOT user {sender_id}")
+        profile = {"id": f"mybot_{user_id}_{sender_id}", "display_name": display_name, "fallback": True}
+
+    _profile_cache[cache_key] = profile
+    return profile
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +332,7 @@ def _send_with_retry(send_fn, request_obj, retries: int = 1) -> bool:
             return False
 
 
-def _reply(access_token: str, reply_token: str, text: str):
+def _reply(access_token: str, reply_token: str, text: str, quick_reply: QuickReply = None):
     """Send a reply message using the channel's own access_token."""
     config = Configuration(access_token=access_token)
     with ApiClient(config) as api_client:
@@ -158,10 +340,16 @@ def _reply(access_token: str, reply_token: str, text: str):
         messages = []
         if len(text) > 4500:
             chunks = [text[i:i + 4500] for i in range(0, len(text), 4500)]
-            for chunk in chunks:
-                messages.append(TextMessage(text=chunk))
+            for i, chunk in enumerate(chunks):
+                msg = TextMessage(text=chunk)
+                if quick_reply and i == len(chunks) - 1:
+                    msg.quick_reply = quick_reply
+                messages.append(msg)
         else:
-            messages.append(TextMessage(text=text))
+            msg = TextMessage(text=text)
+            if quick_reply:
+                msg.quick_reply = quick_reply
+            messages.append(msg)
 
         req = ReplyMessageRequest(
             reply_token=reply_token,
@@ -170,7 +358,7 @@ def _reply(access_token: str, reply_token: str, text: str):
         _send_with_retry(api.reply_message, req)
 
 
-def _push(access_token: str, sender_id: str, text: str):
+def _push(access_token: str, sender_id: str, text: str, quick_reply: QuickReply = None):
     """Send a push message using the channel's own access_token."""
     config = Configuration(access_token=access_token)
     with ApiClient(config) as api_client:
@@ -182,6 +370,9 @@ def _push(access_token: str, sender_id: str, text: str):
                 messages.append(TextMessage(text=chunk))
         else:
             messages.append(TextMessage(text=text))
+
+        if quick_reply:
+            messages[-1].quick_reply = quick_reply
 
         req = PushMessageRequest(
             to=sender_id,
@@ -228,11 +419,11 @@ def _process_message(
     user_text: str,
     access_token: str,
     bot_settings: dict,
+    profile: dict,
 ):
     """Run MYBOT agent loop in a background thread and push the result."""
     try:
         history = _load_history(user_id, sender_id)
-        profile = {"id": f"mybot_{user_id}_{sender_id}", "display_name": "ユーザー"}
         _bot_name = bot_settings.get("bot_name", "MYBOT")
 
         notified_tools: set[str] = set()
@@ -245,6 +436,7 @@ def _process_message(
             history=history,
             profile=profile,
             bot_settings=bot_settings,
+            active_race_id_hint=_get_active_race(user_id, sender_id),
         ):
             chunk_type = chunk.get("type")
 
@@ -278,9 +470,42 @@ def _process_message(
                     pending_notice_timer.cancel()
 
                 full_text = chunk["text"]
+                tools_used = chunk.get("tools_used", [])
+                active_race_id = chunk.get("active_race_id")
                 updated_history = chunk.get("history", history)
                 _save_history(user_id, sender_id, updated_history)
-                _push(access_token, sender_id, full_text)
+
+                # Always save active_race_id so next message has context
+                if active_race_id:
+                    _set_active_race(user_id, sender_id, active_race_id)
+
+                # Honmei (みんなの予想) integration
+                qr = None
+                used_set = set(tools_used)
+                if used_set & {"get_race_entries", "get_predictions"} and active_race_id:
+                    if profile.get("fallback"):
+                        already_picked = True
+                    else:
+                        try:
+                            already_picked = db_check_prediction(profile["id"], active_race_id)
+                        except Exception:
+                            already_picked = True
+                    if not already_picked:
+                        honmei_qr = get_honmei_quick_reply(active_race_id)
+                        if honmei_qr:
+                            full_text += (
+                                "\n\n━━━━━━━━\n"
+                                "📢 みんなの予想\n"
+                                "━━━━━━━━\n\n"
+                                "お前の本命を教えてくれ！👇"
+                            )
+                            qr = honmei_qr
+
+                # Context quick replies (if no honmei QR)
+                if not qr:
+                    qr = get_mybot_quick_reply(tools_used)
+
+                _push(access_token, sender_id, full_text, quick_reply=qr)
 
     except Exception:
         logger.exception(f"Error in MYBOT background processing user_id={user_id}")
@@ -548,13 +773,160 @@ def handle_mybot_webhook(user_id: str):
                 )
                 continue
 
+            # --- Get user profile from Supabase ---
+            profile = _get_mybot_profile(user_id, sender_id, access_token)
+
+            # --- Transfer code display ---
+            if user_text in ("引き継ぎコード", "連携コード", "アカウント連携", "記憶コピー", "記憶コピーコード"):
+                if profile.get("fallback"):
+                    _reply(access_token, reply_token, "今ちょっと不安定みたいだ。少し時間おいてくれ！")
+                    continue
+                code = profile.get("transfer_code", "")
+                if not code:
+                    from db.user_manager import get_transfer_code as _get_code
+                    try:
+                        code = _get_code(profile["id"])
+                    except Exception:
+                        pass
+                if code:
+                    _reply(access_token, reply_token,
+                           f"お前の記憶コピーコードはこれだ👇\n\n"
+                           f"🔑 記憶コピー {code}\n\n"
+                           "他のBOTにこのコードを送ると、\n"
+                           "ここでの記憶や成績がコピーされるぜ！\n\n"
+                           "逆に他のBOTのコードをここで送れば、\n"
+                           "そっちの記憶をこっちにコピーできるぞ！")
+                else:
+                    _reply(access_token, reply_token, "コードが取得できなかった。もう一回試してくれ！")
+                continue
+
+            # --- Transfer code input: 「引き継ぎ XXXXXX」or「記憶コピー XXXXXX」 ---
+            transfer_match = re.match(r"(?:引き継ぎ|記憶コピー)\s+([A-Za-z0-9]{4,8})", user_text)
+            if transfer_match:
+                input_code = transfer_match.group(1).strip().upper()
+                if profile.get("fallback"):
+                    _reply(access_token, reply_token, "今ちょっと不安定みたいだ。少し時間おいてくれ！")
+                    continue
+
+                own_code = profile.get("transfer_code", "")
+                if own_code and own_code == input_code:
+                    _reply(access_token, reply_token, "それはお前自身のコードだぜ！別のアカウントのコードを入力してくれ。")
+                    continue
+
+                sb = get_client()
+                try:
+                    res = sb.table("user_profiles") \
+                        .select("*") \
+                        .eq("transfer_code", input_code) \
+                        .limit(1) \
+                        .execute()
+                except Exception:
+                    _reply(access_token, reply_token, "ごめん、エラーが出ちゃった。もう一回試してくれ！")
+                    continue
+
+                if not res.data:
+                    _reply(access_token, reply_token, "そのコードは見つからなかった。もう一回確認してくれ！")
+                    continue
+
+                source_profile = res.data[0]
+                source_id = source_profile["id"]
+
+                # Bidirectional sync: copy memories/stats between both profiles
+                from db.user_manager import sync_profiles as _sync
+
+                try:
+                    synced = _sync(profile["id"], source_id)
+                except Exception:
+                    synced = False
+
+                if synced:
+                    _profile_cache.pop(f"{user_id}:{sender_id}", None)
+                    _reply(access_token, reply_token,
+                           "🎉 アカウント連携完了！\n\n"
+                           "データを統合したぜ。記憶や成績が引き継がれたぞ！")
+                    logger.info(f"MYBOT LINE account sync: {profile['id'][:10]}... <-> {source_id[:10]}...")
+                else:
+                    _reply(access_token, reply_token, "ごめん、連携でエラーが出ちゃった。もう一回試してくれ！")
+                continue
+
+            # --- Honmei (本命) selection handler ---
+            if user_text.startswith("本命 ") or user_text.startswith("本命:"):
+                match = re.match(r"本命[:\s]+(\d+)番?\s*(.*)", user_text)
+                if not match:
+                    _reply(access_token, reply_token, "馬番がわからなかった...もう一回タップしてくれ！")
+                    continue
+
+                horse_number = int(match.group(1))
+                horse_name = match.group(2).strip() or f"{horse_number}番"
+
+                race_id = _get_active_race(user_id, sender_id)
+                if not race_id:
+                    history = _load_history(user_id, sender_id)
+                    race_id = find_race_id(history)
+
+                if not race_id:
+                    _reply(access_token, reply_token,
+                           "どのレースの本命か分からなかった。先にレースを見てから選んでくれ！")
+                    continue
+
+                if profile.get("fallback"):
+                    _reply(access_token, reply_token,
+                           "今ちょっと登録が不安定みたいだ。少し時間おいてもう一回お願い！")
+                    continue
+
+                from tools.executor import _race_cache
+                venue = ""
+                if race_id in _race_cache and "entries" in _race_cache[race_id]:
+                    venue = _race_cache[race_id]["entries"].get("venue", "")
+
+                try:
+                    record = db_record_prediction(
+                        user_profile_id=profile["id"],
+                        race_id=race_id,
+                        horse_number=horse_number,
+                        horse_name=horse_name,
+                        race_name="",
+                        venue=venue,
+                    )
+                except Exception:
+                    logger.exception("Failed to record MYBOT honmei")
+                    record = None
+
+                if record:
+                    _clear_active_race(user_id, sender_id)
+                    _reply(access_token, reply_token,
+                           f"👊 {horse_number}番 {horse_name} を本命で登録したぜ！\n\n"
+                           "みんなの予想に追加したからな。結果出たら回収率も計算してやるよ。")
+                    logger.info(f"MYBOT honmei: user={sender_id} race={race_id} horse={horse_number} {horse_name}")
+                else:
+                    _reply(access_token, reply_token,
+                           "ごめん、登録でエラーが出ちゃった。もう一回試してくれ！")
+                continue
+
+            # --- Honmei blocking: pending pick ---
+            if _has_pending_honmei(user_id, sender_id, profile["id"]):
+                if not _is_same_race_query(user_text):
+                    pending_race = _get_active_race(user_id, sender_id) or ""
+                    honmei_qr = get_honmei_quick_reply(pending_race)
+                    if honmei_qr:
+                        _reply(
+                            access_token, reply_token,
+                            "おっと、ちょっと待ってくれ！\n\n"
+                            "「みんなの予想」を集めてるんだ。\n"
+                            "みんなの本命を集計して、回収率ランキングを出していく予定なんだよ。\n\n"
+                            "どうか協力してやってくれ🙏\n\n"
+                            "👇 下のボタンから本命をタップ！",
+                            quick_reply=honmei_qr,
+                        )
+                        continue
+
             # --- Normal message: reply with thinking + run agent ---
             _reply(access_token, reply_token, "考え中...")
 
             # Process in background thread
             thread = threading.Thread(
                 target=_process_message,
-                args=(user_id, sender_id, user_text, access_token, bot_settings),
+                args=(user_id, sender_id, user_text, access_token, bot_settings, profile),
                 daemon=True,
             )
             thread.start()

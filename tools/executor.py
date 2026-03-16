@@ -76,7 +76,7 @@ def _resolve_netkeiba_race_id(race_id: str, race_type: str = "jra") -> str:
     """Resolve custom race_id (YYYYMMDD-venue-num) to netkeiba race_id.
 
     If already a netkeiba ID (all digits, 10-12 chars), return as-is.
-    If custom format, scrape race list to find the matching netkeiba ID.
+    Resolution order: memory cache → prefetch data → scraper fallback.
     """
     # Already a netkeiba ID
     if race_id.isdigit() and len(race_id) >= 10:
@@ -87,7 +87,7 @@ def _resolve_netkeiba_race_id(race_id: str, race_type: str = "jra") -> str:
     if not m:
         return race_id  # Unknown format, return as-is
 
-    # Check cache
+    # Check memory cache
     if race_id in _netkeiba_id_cache:
         return _netkeiba_id_cache[race_id]
 
@@ -95,6 +95,27 @@ def _resolve_netkeiba_race_id(race_id: str, race_type: str = "jra") -> str:
     venue = m.group(2)
     race_number = int(m.group(3))
 
+    # Method 1: Check prefetch data (most reliable)
+    prefetch_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'data', 'prefetch', f'races_{date_str}.json',
+    )
+    if os.path.exists(prefetch_path):
+        try:
+            with open(prefetch_path, 'r', encoding='utf-8') as f:
+                prefetch_data = json.load(f)
+            for r in prefetch_data.get("races", []):
+                rid = r.get("race_id", "")
+                nk_id = r.get("race_id_netkeiba", "")
+                if rid and nk_id:
+                    _netkeiba_id_cache[rid] = nk_id
+            if race_id in _netkeiba_id_cache:
+                logger.info(f"Resolved via prefetch: {race_id} → {_netkeiba_id_cache[race_id]}")
+                return _netkeiba_id_cache[race_id]
+        except Exception:
+            logger.warning(f"Failed to load prefetch for {date_str}")
+
+    # Method 2: Scraper fallback
     is_nar = any(v in venue for v in NAR_VENUES)
 
     try:
@@ -106,14 +127,14 @@ def _resolve_netkeiba_race_id(race_id: str, race_type: str = "jra") -> str:
         for r in races:
             if r.venue == venue and r.race_number == race_number:
                 _netkeiba_id_cache[race_id] = r.race_id
-                logger.info(f"Resolved race_id: {race_id} → {r.race_id}")
+                logger.info(f"Resolved via scraper: {race_id} → {r.race_id}")
                 return r.race_id
 
         # Try looser match (venue contains)
         for r in races:
             if venue in r.venue and r.race_number == race_number:
                 _netkeiba_id_cache[race_id] = r.race_id
-                logger.info(f"Resolved race_id (loose): {race_id} → {r.race_id}")
+                logger.info(f"Resolved via scraper (loose): {race_id} → {r.race_id}")
                 return r.race_id
     except Exception:
         logger.exception(f"Failed to resolve race_id: {race_id}")
