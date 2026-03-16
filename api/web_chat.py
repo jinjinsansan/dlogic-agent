@@ -129,7 +129,7 @@ def chat():
     history = session["history"]
 
     # --- Handle 「引き継ぎコード」request (no code provided) → redirect to LINE app ---
-    if message in ("引き継ぎコード", "連携コード", "アカウント連携", "記憶コピー", "記憶コピーコード"):
+    if message in ("引き継ぎコード", "引継ぎコード", "連携コード", "アカウント連携", "記憶コピー", "記憶コピーコード"):
         redirect_msg = (
             "📱 連携コードはLINEアプリのDロジくんから取得してください！\n\n"
             "① LINEアプリを開く\n"

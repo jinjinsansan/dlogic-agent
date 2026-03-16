@@ -606,7 +606,7 @@ def handle_message(event: MessageEvent):
         _reply(event.reply_token, text)
         return
 
-    if user_text in ("引き継ぎコード", "連携コード", "アカウント連携", "記憶コピー", "記憶コピーコード"):
+    if user_text in ("引き継ぎコード", "引継ぎコード", "連携コード", "アカウント連携", "記憶コピー", "記憶コピーコード"):
         profile = _get_profile(user_id, display_name)
         if profile.get("fallback"):
             _reply(event.reply_token, "今ちょっと不安定みたいだ。少し時間おいてくれ！")

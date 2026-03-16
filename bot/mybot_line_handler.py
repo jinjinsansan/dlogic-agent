@@ -777,7 +777,7 @@ def handle_mybot_webhook(user_id: str):
             profile = _get_mybot_profile(user_id, sender_id, access_token)
 
             # --- Transfer code display ---
-            if user_text in ("引き継ぎコード", "連携コード", "アカウント連携", "記憶コピー", "記憶コピーコード"):
+            if user_text in ("引き継ぎコード", "引継ぎコード", "連携コード", "アカウント連携", "記憶コピー", "記憶コピーコード"):
                 if profile.get("fallback"):
                     _reply(access_token, reply_token, "今ちょっと不安定みたいだ。少し時間おいてくれ！")
                     continue
