@@ -37,8 +37,12 @@ _ROUTES: list[tuple[re.Pattern, str, dict]] = [
     # Data tools
     (re.compile(r"オッズ(は|を|見)?"), "odds", {}),
     (re.compile(r"馬体重(は|を|見)?"), "weights", {}),
-    (re.compile(r"調教(は|を|どう)?"), "training", {}),
+    (re.compile(r"調教(は|を|どう|評価)?"), "training", {}),
     (re.compile(r"(予測)?勝率(は|を|見)?"), "odds_probability", {}),
+    (re.compile(r"関係者(情報|の|は)?"), "stable_comments", {}),
+    (re.compile(r"(陣営|厩舎)(の|コメント|情報|は)"), "stable_comments", {}),
+    (re.compile(r"結果(は|を|見)?[？?]?$"), "race_results", {}),
+    (re.compile(r"(何着|着順|勝った馬)"), "race_results", {}),
     # Stats (no API needed at all)
     (re.compile(r"(俺の|おれの|自分の)?(成績|的中|回収)"), "my_stats", {}),
     # Honmei ratio (みんなの本命比率)
@@ -256,12 +260,115 @@ def _fmt_odds_probability(data: dict) -> str:
     return "\n".join(lines)
 
 
-def _fmt_generic_analysis(data: dict, tool_name: str) -> str:
-    """Generic fallback: return raw JSON summary for analysis tools.
-    Claude will format these when user asks 'お前どう思う？'"""
-    # For analysis tools, we still want Claude to interpret the data
-    # Return None to fall through to Claude
-    return None
+def _fmt_stable_comments(data: dict) -> str:
+    """Format stable/trainer comments for LINE display."""
+    comments = data.get("comments", [])
+    if not comments:
+        return data.get("note", "関係者情報がまだ出てないみたいだ。")
+
+    lines = ["━━ 関係者情報 ━━"]
+    lines.append("")
+
+    for c in comments:
+        num = c.get("horse_number", "?")
+        name = c.get("horse_name", "?")
+        rank = c.get("rank", "")
+        comment = c.get("comment", "")
+        condition = c.get("condition", "")
+
+        rank_str = f"【{rank}】" if rank else ""
+        lines.append(f"{num}.{name} {rank_str}")
+        if condition:
+            lines.append(f"  状態: {condition}")
+        if comment:
+            # Truncate long comments
+            short = comment[:60] + "…" if len(comment) > 60 else comment
+            lines.append(f"  → {short}")
+        lines.append("")
+
+    lines.append("━━━━━━━━")
+    lines.append("※関係者情報を要約して表示")
+    return "\n".join(lines)
+
+
+def _fmt_training_comments(data: dict) -> str:
+    """Format training evaluation for LINE display."""
+    comments = data.get("comments", [])
+    if not comments:
+        return data.get("note", "調教評価がまだ出てないみたいだ。")
+
+    lines = ["━━ 調教評価 ━━"]
+    lines.append("")
+
+    for c in comments:
+        num = c.get("horse_number", "?")
+        name = c.get("horse_name", "?")
+        rank = c.get("rank", "")
+        summary = c.get("summary", "")
+        comment = c.get("comment", "")
+
+        rank_str = f"【{rank}】" if rank else ""
+        lines.append(f"{num}.{name} {rank_str}")
+        if summary:
+            lines.append(f"  {summary}")
+        if comment:
+            short = comment[:60] + "…" if len(comment) > 60 else comment
+            lines.append(f"  → {short}")
+        lines.append("")
+
+    lines.append("━━━━━━━━")
+    lines.append("※調教評価を要約して表示")
+    return "\n".join(lines)
+
+
+def _fmt_race_results(data: dict) -> str:
+    """Format race results for LINE display."""
+    results = data.get("results", [])
+    if not results:
+        return data.get("note", "まだ結果が出てないみたいだ。")
+
+    race_name = data.get("race_name", "")
+    venue = data.get("venue", "")
+
+    lines = []
+    if race_name or venue:
+        lines.append(f"【{venue} {race_name}】")
+    lines.append("━━ レース結果 ━━")
+    lines.append("")
+
+    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+    for r in results:
+        pos = r.get("position", "?")
+        num = r.get("horse_number", "?")
+        name = r.get("horse_name", "?")
+        jockey = r.get("jockey", "")
+        time_str = r.get("time", "")
+        odds = r.get("odds", "")
+
+        medal = medals.get(pos, f"{pos}着")
+        if isinstance(pos, int) and pos <= 3:
+            medal_str = f"{medal} "
+        else:
+            medal_str = f"{pos}着 "
+
+        line = f"{medal_str}{num}.{name}"
+        if jockey:
+            line += f"（{jockey}）"
+        if time_str:
+            line += f" {time_str}"
+        lines.append(line)
+
+    # Payouts
+    payouts = data.get("payouts", {})
+    if payouts:
+        lines.append("")
+        lines.append("─────────")
+        for bet_type, amount in payouts.items():
+            if amount:
+                lines.append(f"💰 {bet_type}: {amount}円")
+
+    lines.append("━━━━━━━━")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -467,10 +574,75 @@ def route_and_respond(
         return {"text": text, "footer": footer, "tools_used": tools_used,
                 "history_entries": history_entries, "active_race_id": race_id}
 
+    # ── Route: stable_comments (関係者情報) ──
+    if route_name == "stable_comments":
+        race_id = find_race_id(history) or active_race_id_hint
+        if not race_id:
+            return None
+
+        _ensure_entries_cached(race_id)
+        result_str = execute_tool("get_stable_comments", {"race_id": race_id}, context=tool_context)
+        data = json.loads(result_str)
+        text = _fmt_stable_comments(data)
+        tools_used = ["get_stable_comments"]
+        footer = format_tools_used_footer(tools_used)
+        history_entries = _build_history_entries(
+            tool_name="get_stable_comments",
+            tool_input={"race_id": race_id},
+            tool_result=result_str,
+            final_text=text,
+        )
+        return {"text": text, "footer": footer, "tools_used": tools_used,
+                "history_entries": history_entries, "active_race_id": race_id}
+
+    # ── Route: training (調教評価) ──
+    if route_name == "training":
+        race_id = find_race_id(history) or active_race_id_hint
+        if not race_id:
+            return None
+
+        _ensure_entries_cached(race_id)
+        result_str = execute_tool("get_training_comments", {"race_id": race_id}, context=tool_context)
+        data = json.loads(result_str)
+        text = _fmt_training_comments(data)
+        tools_used = ["get_training_comments"]
+        footer = format_tools_used_footer(tools_used)
+        history_entries = _build_history_entries(
+            tool_name="get_training_comments",
+            tool_input={"race_id": race_id},
+            tool_result=result_str,
+            final_text=text,
+        )
+        return {"text": text, "footer": footer, "tools_used": tools_used,
+                "history_entries": history_entries, "active_race_id": race_id}
+
+    # ── Route: race_results (レース結果) ──
+    if route_name == "race_results":
+        race_id = find_race_id(history) or active_race_id_hint
+        if not race_id:
+            return None
+
+        _ensure_entries_cached(race_id)
+        cache_entry = _race_cache.get(race_id, {})
+        race_type = cache_entry.get("entries", {}).get("race_type", "jra")
+        result_str = execute_tool("get_race_results", {"race_id": race_id, "race_type": race_type}, context=tool_context)
+        data = json.loads(result_str)
+        text = _fmt_race_results(data)
+        tools_used = ["get_race_results"]
+        footer = format_tools_used_footer(tools_used)
+        history_entries = _build_history_entries(
+            tool_name="get_race_results",
+            tool_input={"race_id": race_id, "race_type": race_type},
+            tool_result=result_str,
+            final_text=text,
+        )
+        return {"text": text, "footer": footer, "tools_used": tools_used,
+                "history_entries": history_entries, "active_race_id": race_id}
+
     # ── Analysis routes: fall through to Claude ──
-    # race_flow, jockey, bloodline, recent_runs, training
+    # race_flow, jockey, bloodline, recent_runs
     # These need Claude to interpret and summarize the data
-    if route_name in ("race_flow", "jockey", "bloodline", "recent_runs", "training"):
+    if route_name in ("race_flow", "jockey", "bloodline", "recent_runs"):
         return None  # Claude handles these (interpretation needed)
 
     return None

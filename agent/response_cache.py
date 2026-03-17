@@ -38,6 +38,8 @@ TOOL_QUERY_MAP = {
     "get_recent_runs": "recent-runs",
     "get_odds_probability": "odds-probability",
     "get_stable_comments": "stable-comments",
+    "get_training_comments": "training",
+    "get_race_results": "race-results",
     "get_engine_stats": "engine-stats",
 }
 
@@ -68,6 +70,13 @@ _MSG_PATTERNS = [
     ("調教師の", "stable-comments"),
     ("関係者情報", "stable-comments"),
     ("関係者の", "stable-comments"),
+    ("調教評価", "training"),
+    ("調教は", "training"),
+    ("調教どう", "training"),
+    ("結果は", "race-results"),
+    ("何着", "race-results"),
+    ("着順", "race-results"),
+    ("勝った馬", "race-results"),
     ("的中率", "engine-stats"),
     ("エンジンの精度", "engine-stats"),
     ("どのくらい当たる", "engine-stats"),
