@@ -230,7 +230,7 @@ def run_agent(
     # ── Pre-loop cache check ──
     query_type = detect_query_type(user_message)
     if query_type:
-        race_id = find_race_id(history)
+        race_id = find_race_id(history) or active_race_id_hint
         if race_id:
             cached = get_cached_response(race_id, query_type)
             if cached:
