@@ -479,9 +479,15 @@ async def maintenance_on_command(update: Update, context: ContextTypes.DEFAULT_T
     custom_msg = " ".join(context.args) if context.args else None
     set_maintenance(True, custom_msg)
     msg = get_maintenance_message()
+
+    # Switch rich menu to maintenance
+    from bot.line_handlers import enable_maintenance_menu
+    enable_maintenance_menu()
+
     await update.message.reply_text(
         f"🔧 メンテナンスモード ON\n\n"
         f"LINE Botへの全メッセージがブロックされます。\n"
+        f"リッチメニューをメンテナンス用に切替済み。\n"
         f"表示メッセージ: {msg}\n\n"
         f"/maintenance_off で解除"
     )
@@ -493,7 +499,16 @@ async def maintenance_off_command(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text("⛔ 管理者のみ使用可能です。")
         return
     set_maintenance(False)
-    await update.message.reply_text("✅ メンテナンスモード OFF\nLINE Bot通常稼働に復帰しました。")
+
+    # Switch rich menu back to normal
+    from bot.line_handlers import disable_maintenance_menu
+    disable_maintenance_menu()
+
+    await update.message.reply_text(
+        "✅ メンテナンスモード OFF\n"
+        "LINE Bot通常稼働に復帰しました。\n"
+        "リッチメニューを通常メニューに復帰済み。"
+    )
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -549,9 +564,9 @@ async def activate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         f"残りウェイトリスト: {remaining}人"
     )
 
-    # Send activation notification to each user via LINE
+    # Send activation notification + switch rich menu for each user via LINE
     import time as _time
-    from bot.line_handlers import _push, get_start_quick_reply
+    from bot.line_handlers import _push, get_start_quick_reply, switch_to_normal_menu
     from config import ONBOARDING_TEXT
     notified = 0
     for user in activated:
@@ -560,6 +575,7 @@ async def activate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             logger.info(f"Skip notification (no LINE ID): {user['display_name']}")
             continue
         try:
+            switch_to_normal_menu(line_uid)
             _push(
                 line_uid,
                 "よう、待たせたな！🔥\n\n"
@@ -823,9 +839,9 @@ async def activate_all_command(update: Update, context: ContextTypes.DEFAULT_TYP
         f"LINE通知を送信中..."
     )
 
-    # Send activation notifications
+    # Send activation notifications + switch rich menu
     import time as _time
-    from bot.line_handlers import _push, get_start_quick_reply
+    from bot.line_handlers import _push, get_start_quick_reply, switch_to_normal_menu
     from config import ONBOARDING_TEXT
     success = 0
     for user in activated:
@@ -834,6 +850,7 @@ async def activate_all_command(update: Update, context: ContextTypes.DEFAULT_TYP
             logger.info(f"Skip notification (no LINE ID): {user['display_name']}")
             continue
         try:
+            switch_to_normal_menu(line_uid)
             _push(
                 line_uid,
                 "よう、待たせたな！🔥\n\n"

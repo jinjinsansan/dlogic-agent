@@ -40,8 +40,34 @@ _INQUIRY_MODE_PREFIX = "mybot:inquiry_mode:web:"
 _INQUIRY_MODE_TTL = 300  # 5 minutes
 _INQUIRY_KEYWORDS = {"Dlogic運営に問い合わせ", "問い合わせしたい", "お問い合わせ"}
 
+# Rate limiting
+_RATE_LIMIT_PREFIX = "mybot:ratelimit:"
+_RATE_LIMITS = {
+    "chat": (10, 60),       # 10 requests per 60 seconds
+    "settings": (5, 60),    # 5 per 60s
+    "follow": (10, 60),     # 10 per 60s
+    "upload": (3, 60),      # 3 per 60s
+    "inquiry": (3, 300),    # 3 per 5 minutes
+}
+
+
+def _check_rate_limit(user_id: str, action: str) -> bool:
+    """Check rate limit. Returns True if allowed, False if exceeded."""
+    if not _redis:
+        return True  # fail-open if Redis unavailable
+    limit, window = _RATE_LIMITS.get(action, (30, 60))
+    key = f"{_RATE_LIMIT_PREFIX}{action}:{user_id}"
+    try:
+        current = _redis.incr(key)
+        if current == 1:
+            _redis.expire(key, window)
+        return current <= limit
+    except Exception:
+        return True  # fail-open
+
 # Official Dlogic bot identifier (used for follow system)
 DLOGIC_OFFICIAL_BOT_ID = "00000000-0000-0000-0000-000000000000"
+_RESERVED_UUIDS = {DLOGIC_OFFICIAL_BOT_ID}
 
 # Default IMLogic weights
 DEFAULT_ITEM_WEIGHTS = {
@@ -116,6 +142,11 @@ def save_settings():
         return jsonify({"error": "Unauthorized"}), 401
 
     user_id = payload["pid"]
+    if user_id in _RESERVED_UUIDS:
+        return jsonify({"error": "この操作は許可されていません"}), 403
+    if not _check_rate_limit(user_id, "settings"):
+        return jsonify({"error": "リクエストが多すぎます。少し待ってからお試しください。"}), 429
+
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"error": "Invalid JSON"}), 400
@@ -129,6 +160,12 @@ def save_settings():
     bot_name = data.get("bot_name", "MYBOT").strip()
     if not bot_name or len(bot_name) > 20:
         return jsonify({"error": "bot_name must be 1-20 characters"}), 400
+
+    # Prevent impersonation of official bot
+    _FORBIDDEN_NAMES = ["dロジ", "dlogic公式", "ディーロジ", "d-logic"]
+    bot_name_lower = bot_name.lower()
+    if any(fn in bot_name_lower for fn in _FORBIDDEN_NAMES):
+        return jsonify({"error": "この名前は使用できません"}), 400
 
     sb = get_client()
 
@@ -323,6 +360,8 @@ def upload_icon():
         return jsonify({"error": "Unauthorized"}), 401
 
     user_id = payload["pid"]
+    if not _check_rate_limit(user_id, "upload"):
+        return jsonify({"error": "リクエストが多すぎます"}), 429
 
     if "icon" not in request.files:
         return jsonify({"error": "No icon file provided"}), 400
@@ -458,7 +497,7 @@ def list_public_bots():
         .execute()
     )
 
-    bots = bots_result.data or []
+    bots = [b for b in (bots_result.data or []) if b["user_id"] not in _RESERVED_UUIDS]
 
     if not bots:
         return jsonify({"bots": [], "total": total})
@@ -664,6 +703,9 @@ def follow_bot():
         return jsonify({"error": "Unauthorized"}), 401
 
     user_id = payload["pid"]
+    if not _check_rate_limit(user_id, "follow"):
+        return jsonify({"error": "リクエストが多すぎます"}), 429
+
     data = request.get_json(silent=True)
     if not data or not data.get("bot_user_id"):
         return jsonify({"error": "bot_user_id required"}), 400
@@ -911,6 +953,11 @@ def mybot_chat():
     message = data.get("message", "").strip()
     if not message:
         return jsonify({"error": "Empty message"}), 400
+
+    # Rate limit
+    rate_user = payload["pid"] if payload else request.remote_addr or "anon"
+    if not _check_rate_limit(rate_user, "chat"):
+        return jsonify({"error": "リクエストが多すぎます。少し待ってからお試しください。"}), 429
 
     session_id = data.get("session_id", str(uuid.uuid4()))
     bot_user_id = data.get("bot_user_id", "")

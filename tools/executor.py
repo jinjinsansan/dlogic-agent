@@ -245,13 +245,32 @@ def _load_prefetch(date_str: str) -> dict | None:
 
 
 def _find_prefetch_race(date_str: str, race_id: str) -> dict | None:
-    """Find a specific race from prefetch data by race_id."""
+    """Find a specific race from prefetch data by race_id or netkeiba race_id."""
     data = _load_prefetch(date_str)
     if not data:
         return None
     for race in data.get('races', []):
         if race.get('race_id') == race_id:
             return race
+        # Also match by netkeiba race_id (reverse lookup)
+        if race.get('race_id_netkeiba') == race_id:
+            return race
+    return None
+
+
+def _find_prefetch_race_by_netkeiba_id(netkeiba_id: str) -> dict | None:
+    """Search today's prefetch data for a race matching the given netkeiba race_id.
+
+    Used when only a netkeiba-format race_id (all digits) is available.
+    """
+    today = datetime.now().strftime("%Y%m%d")
+    for date_str in [today]:
+        data = _load_prefetch(date_str)
+        if not data:
+            continue
+        for race in data.get('races', []):
+            if race.get('race_id_netkeiba') == netkeiba_id:
+                return race
     return None
 
 
@@ -357,58 +376,65 @@ def _get_race_entries(params: dict) -> str:
     race_type = params.get("race_type", "jra")
 
     # Step 0: Try prefetched JSON
+    pf = None
     date_part = race_id.split("-")[0] if "-" in race_id else ""
     if date_part:
         pf = _find_prefetch_race(date_part, race_id)
-        if pf and pf.get('horses'):
-            # Validate parallel arrays integrity
-            pf_valid, pf_warnings = validate_parallel_arrays(pf, race_id)
-            for w in pf_warnings:
-                logger.warning(f"Prefetch validation: {w}")
-            if not pf_valid:
-                logger.error(f"Prefetch data invalid for {race_id}, falling through to scraping")
-            else:
-                entries = []
-                for i in range(len(pf['horses'])):
-                    entry = {
-                        "horse_number": pf['horse_numbers'][i] if i < len(pf.get('horse_numbers', [])) else i + 1,
-                        "horse_name": pf['horses'][i],
-                        "jockey": pf['jockeys'][i] if i < len(pf.get('jockeys', [])) else "",
-                        "trainer": pf['trainers'][i] if i < len(pf.get('trainers', [])) else "",
-                        "post": pf['posts'][i] if i < len(pf.get('posts', [])) else 0,
-                        "sex_age": pf['sex_ages'][i] if i < len(pf.get('sex_ages', [])) else "",
-                        "weight": pf['weights'][i] if i < len(pf.get('weights', [])) else 0,
-                    }
-                    if pf.get('odds') and i < len(pf['odds']):
-                        entry["odds"] = pf['odds'][i]
-                    if pf.get('popularities') and i < len(pf['popularities']):
-                        entry["popularity"] = pf['popularities'][i]
-                    entries.append(entry)
+    elif race_id.isdigit() and len(race_id) >= 10:
+        # Netkeiba-format race_id (no dash) — reverse lookup in prefetch
+        pf = _find_prefetch_race_by_netkeiba_id(race_id)
+        if pf:
+            logger.info(f"Prefetch reverse lookup hit: {race_id} → {pf.get('race_id')}")
 
-                # Validate constructed entries
-                entries_valid, entries_warnings = validate_race_entries(entries, race_id)
-                for w in entries_warnings:
-                    logger.warning(f"Prefetch entries: {w}")
-                if not entries_valid:
-                    logger.error(f"Prefetch entries invalid for {race_id}, falling through to scraping")
-                else:
-                    result = {
-                        "race_id": race_id,
-                        "race_name": pf.get('race_name', ''),
-                        "venue": pf.get('venue', ''),
-                        "distance": pf.get('distance', ''),
-                        "race_number": pf.get('race_number', 0),
-                        "track_condition": pf.get('track_condition', '−'),
-                        "headcount": len(pf['horses']),
-                        "entries": entries,
-                        "source": "prefetch",
-                        "odds": pf.get('odds', []),
-                    }
-                    if pf.get('predictions'):
-                        result["predictions"] = _rename_prediction_keys(pf['predictions'])
-                    # Cache race data for analysis tools
-                    _cache_race_data(race_id, entries, result)
-                    return json.dumps(result, ensure_ascii=False)
+    if pf and pf.get('horses'):
+        # Validate parallel arrays integrity
+        pf_valid, pf_warnings = validate_parallel_arrays(pf, race_id)
+        for w in pf_warnings:
+            logger.warning(f"Prefetch validation: {w}")
+        if not pf_valid:
+            logger.error(f"Prefetch data invalid for {race_id}, falling through to scraping")
+        else:
+            entries = []
+            for i in range(len(pf['horses'])):
+                entry = {
+                    "horse_number": pf['horse_numbers'][i] if i < len(pf.get('horse_numbers', [])) else i + 1,
+                    "horse_name": pf['horses'][i],
+                    "jockey": pf['jockeys'][i] if i < len(pf.get('jockeys', [])) else "",
+                    "trainer": pf['trainers'][i] if i < len(pf.get('trainers', [])) else "",
+                    "post": pf['posts'][i] if i < len(pf.get('posts', [])) else 0,
+                    "sex_age": pf['sex_ages'][i] if i < len(pf.get('sex_ages', [])) else "",
+                    "weight": pf['weights'][i] if i < len(pf.get('weights', [])) else 0,
+                }
+                if pf.get('odds') and i < len(pf['odds']):
+                    entry["odds"] = pf['odds'][i]
+                if pf.get('popularities') and i < len(pf['popularities']):
+                    entry["popularity"] = pf['popularities'][i]
+                entries.append(entry)
+
+            # Validate constructed entries
+            entries_valid, entries_warnings = validate_race_entries(entries, race_id)
+            for w in entries_warnings:
+                logger.warning(f"Prefetch entries: {w}")
+            if not entries_valid:
+                logger.error(f"Prefetch entries invalid for {race_id}, falling through to scraping")
+            else:
+                result = {
+                    "race_id": race_id,
+                    "race_name": pf.get('race_name', ''),
+                    "venue": pf.get('venue', ''),
+                    "distance": pf.get('distance', ''),
+                    "race_number": pf.get('race_number', 0),
+                    "track_condition": pf.get('track_condition', '−'),
+                    "headcount": len(pf['horses']),
+                    "entries": entries,
+                    "source": "prefetch",
+                    "odds": pf.get('odds', []),
+                }
+                if pf.get('predictions'):
+                    result["predictions"] = _rename_prediction_keys(pf['predictions'])
+                # Cache race data for analysis tools
+                _cache_race_data(race_id, entries, result)
+                return json.dumps(result, ensure_ascii=False)
 
     # Step 1: Try TS archive
     arch = archive.find_archive_race_by_id(race_id)
@@ -908,12 +934,17 @@ def _get_stable_comments(params: dict) -> str:
 
     # Try prefetch for missing info
     if not venue or not race_number or not date_str:
+        pf_info = None
         if date_str:
-            pf = _find_prefetch_race(date_str, race_id)
-            if pf:
-                venue = venue or pf.get("venue", "")
-                race_number = race_number or pf.get("race_number", 0)
-                is_chihou = pf.get("is_local", True)
+            pf_info = _find_prefetch_race(date_str, race_id)
+        if not pf_info and race_id.isdigit() and len(race_id) >= 10:
+            pf_info = _find_prefetch_race_by_netkeiba_id(race_id)
+            if pf_info:
+                date_str = date_str or pf_info.get("race_date", "").replace("-", "")
+        if pf_info:
+            venue = venue or pf_info.get("venue", "")
+            race_number = race_number or pf_info.get("race_number", 0)
+            is_chihou = pf_info.get("is_local", True)
 
     if not venue or not race_number or not date_str:
         return json.dumps({
@@ -1290,7 +1321,11 @@ def _get_odds_probability(params: dict) -> str:
         date_part = race_id.split("-")[0] if "-" in race_id else ""
         if date_part:
             pf = _find_prefetch_race(date_part, race_id)
-            if pf:
+        elif race_id.isdigit() and len(race_id) >= 10:
+            pf = _find_prefetch_race_by_netkeiba_id(race_id)
+        else:
+            pf = None
+        if pf:
                 if not horses:
                     horses = pf.get("horses", [])
                 if not horse_numbers:

@@ -206,7 +206,13 @@ def _fmt_weights(data: dict) -> str:
     for num in sorted(weights.keys(), key=lambda x: int(x)):
         name = name_map.get(num, "")
         w = weights[num]
-        lines.append(f"{num}.{name} {w}kg")
+        if isinstance(w, dict):
+            kg = w.get("weight", "?")
+            diff = w.get("diff", "")
+            diff_str = f"（{diff}）" if diff else ""
+            lines.append(f"{num}.{name}  {kg}kg{diff_str}")
+        else:
+            lines.append(f"{num}.{name}  {w}kg")
     lines.append("━━━━━━━━")
     return "\n".join(lines)
 

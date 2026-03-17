@@ -98,11 +98,21 @@ race_idは内部で使うもの。ユーザーには一切見せない。
 ## データが取れない場合
 技術的な説明は禁止。上記の口調設定に従って自然に伝える。
 
+## 過去走データの扱い（最重要）
+- ツールから返ってきた過去走データだけを使え。ツールに無いデータを絶対に捏造するな
+- 着順・競馬場・距離・オッズ・騎手など、ツールの返り値にない情報は一切言及するな
+- データが少ない・空の馬は「過去走データが少ない」とだけ伝えろ。推測で補完するな
+
+## オッズ・人気の表現ルール
+- オッズに言及する時は必ず「現時点のオッズでは」等、時点を明記しろ
+- 展開予想でオッズに触れる場合も「現時点のオッズ○倍」と表現しろ
+
 ## 絶対禁止
 - データソース名（netkeiba.com等）
 - race_id等の内部ID
 - システムの仕組み・ツール名・API
 - 馬券の強制/ハルシネーション
+- 過去走の捏造（ツールにないデータで着順・競馬場・オッズを語ること）
 - 口調設定を無視すること（例: 敬語設定なのにタメ口で話す等）
 """
 
@@ -182,6 +192,17 @@ def _format_mybot_footer(tools_used: list[str], bot_settings: dict) -> str:
         "get_jockey_analysis": "騎手分析",
         "get_bloodline_analysis": "血統分析",
         "get_recent_runs": "直近走分析",
+        "get_odds_probability": "予測勝率算出",
+        "get_horse_weights": "馬体重取得",
+        "get_stable_comments": "関係者情報取得",
+        "get_training_comments": "調教情報取得",
+        "get_race_results": "レース結果取得",
+        "record_user_prediction": "本命登録",
+        "check_user_prediction": "本命確認",
+        "get_my_stats": "成績確認",
+        "get_prediction_ranking": "ランキング取得",
+        "get_engine_stats": "エンジン成績",
+        "send_inquiry": "問い合わせ送信",
     }
     _SKIP = {"get_race_entries_by_name"}
     seen = set()
@@ -346,6 +367,39 @@ def _execute_imlogic_prediction(race_id: str, bot_settings: dict, context: dict)
         return json.dumps({"error": "予想エンジンに接続できなかった"}, ensure_ascii=False)
 
 
+def _preformat_tool_result(tool_name: str, raw_result: str, race_id: str | None = None) -> str:
+    """Format tool results using the same templates as Dlogic."""
+    try:
+        data = json.loads(raw_result)
+        if "error" in data:
+            return raw_result
+
+        formatted = None
+        if tool_name == "get_odds_probability":
+            from agent.template_router import _fmt_odds_probability
+            formatted = _fmt_odds_probability(data)
+        elif tool_name == "get_horse_weights":
+            from agent.template_router import _fmt_weights
+            # Inject horse names from race cache
+            if race_id:
+                from tools.executor import _race_cache
+                cache_entry = _race_cache.get(race_id, {})
+                entries_data = cache_entry.get("entries", {})
+                if entries_data:
+                    data["_horse_numbers"] = entries_data.get("horse_numbers", [])
+                    data["_horses"] = entries_data.get("horses", [])
+            formatted = _fmt_weights(data)
+
+        if formatted:
+            return json.dumps({
+                "formatted_text": formatted,
+                "instruction": "このformatted_textをそのまま出力しろ。再フォーマット禁止。追加コメントや挨拶も一切不要。formatted_textだけを返せ。",
+            }, ensure_ascii=False)
+    except Exception:
+        pass
+    return raw_result
+
+
 def run_mybot_agent(
     user_message: str,
     history: list[dict],
@@ -395,6 +449,9 @@ def run_mybot_agent(
     response = None
     active_race_id = active_race_id_hint
     tool_context = {"user_profile_id": profile_id}
+    # Tools whose results are pre-formatted and should bypass Claude's text
+    _PREFORMAT_TOOLS = {"get_odds_probability", "get_horse_weights"}
+    last_preformatted_text = None  # If set, use this instead of Claude's response
 
     for turn in range(MAX_TOOL_TURNS):
         response = call_claude(history, system)
@@ -414,11 +471,12 @@ def run_mybot_agent(
         tool_results = []
         for tool_block in tool_blocks:
             tools_used.append(tool_block.name)
-            yield {"type": "tool", "name": tool_block.name}
 
             inp = tool_block.input if isinstance(tool_block.input, dict) else {}
             if inp.get("race_id"):
                 active_race_id = inp["race_id"]
+
+            yield {"type": "tool", "name": tool_block.name, "race_id": active_race_id}
 
             logger.info(f"MYBOT executing tool: {tool_block.name}")
 
@@ -430,6 +488,17 @@ def run_mybot_agent(
             else:
                 result = execute_tool(tool_block.name, tool_block.input, context=tool_context)
 
+            # Pre-format structured data — save formatted text to bypass Claude
+            if tool_block.name in _PREFORMAT_TOOLS:
+                formatted = _preformat_tool_result(tool_block.name, result, active_race_id)
+                if formatted != result:
+                    # formatted is JSON with formatted_text key
+                    try:
+                        last_preformatted_text = json.loads(formatted).get("formatted_text")
+                    except Exception:
+                        last_preformatted_text = None
+                result = formatted
+
             tool_results.append({
                 "type": "tool_result",
                 "tool_use_id": tool_block.id,
@@ -439,7 +508,10 @@ def run_mybot_agent(
         history.append({"role": "user", "content": tool_results})
 
     # Build final response
-    if response:
+    if last_preformatted_text:
+        # Use pre-formatted text directly, bypassing Claude's formatting
+        response_text = last_preformatted_text
+    elif response:
         response_text = extract_text(response)
     else:
         response_text = "ごめん、ちょっと調べすぎちゃった。"

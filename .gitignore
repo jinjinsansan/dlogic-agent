@@ -8,3 +8,7 @@ build/
 logs/
 memory/users.json
 memory/line_users.json
+.claude/
+.factory/
+.serena/
+data/tmp/

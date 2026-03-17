@@ -32,7 +32,7 @@ TOOLS = [
             "properties": {
                 "race_id": {
                     "type": "string",
-                    "description": "レースID（例: '202406050811'）"
+                    "description": "レースID。get_today_racesの結果から取得したrace_idをそのまま使ってください（例: '20260317-中山-11'）。自分でIDを生成しないこと。"
                 },
                 "race_type": {
                     "type": "string",
@@ -65,7 +65,7 @@ TOOLS = [
             "properties": {
                 "race_id": {
                     "type": "string",
-                    "description": "レースID（例: '202406050811'）"
+                    "description": "レースID。get_today_racesの結果から取得したrace_idをそのまま使ってください（例: '20260317-中山-11'）。自分でIDを生成しないこと。"
                 },
                 "race_type": {
                     "type": "string",
@@ -84,7 +84,7 @@ TOOLS = [
             "properties": {
                 "race_id": {
                     "type": "string",
-                    "description": "レースID（例: '202406050811'）"
+                    "description": "レースID。get_today_racesの結果から取得したrace_idをそのまま使ってください（例: '20260317-中山-11'）。自分でIDを生成しないこと。"
                 },
                 "race_type": {
                     "type": "string",
@@ -103,7 +103,7 @@ TOOLS = [
             "properties": {
                 "race_id": {
                     "type": "string",
-                    "description": "レースID（例: '202406050811'）"
+                    "description": "レースID。get_today_racesの結果から取得したrace_idをそのまま使ってください（例: '20260317-中山-11'）。自分でIDを生成しないこと。"
                 },
                 "race_type": {
                     "type": "string",
@@ -122,7 +122,7 @@ TOOLS = [
             "properties": {
                 "race_id": {
                     "type": "string",
-                    "description": "レースID（例: '202406050811'）"
+                    "description": "レースID。get_today_racesの結果から取得したrace_idをそのまま使ってください（例: '20260317-中山-11'）。自分でIDを生成しないこと。"
                 }
             },
             "required": ["race_id"]

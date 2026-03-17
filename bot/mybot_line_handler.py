@@ -28,6 +28,7 @@ from linebot.v3.messaging import (
 from agent.mybot_chat import run_mybot_agent
 from agent.engine import format_tool_notification
 from agent.response_cache import find_race_id
+from bot.tone_messages import get_msg
 from config import TELEGRAM_BOT_TOKEN, ADMIN_TELEGRAM_CHAT_ID
 from db.supabase_client import get_client
 from db.encryption import decrypt_value
@@ -58,20 +59,30 @@ _profile_cache: dict[str, dict] = {}
 
 
 def _set_active_race(user_id: str, sender_id: str, race_id: str):
+    key = f"{_ACTIVE_RACE_PREFIX}{user_id}:{sender_id}"
     if _redis:
         try:
-            _redis.setex(f"{_ACTIVE_RACE_PREFIX}{user_id}:{sender_id}", _ACTIVE_RACE_TTL, race_id)
+            _redis.setex(key, _ACTIVE_RACE_TTL, race_id)
+            logger.info(f"SET active_race: {key} = {race_id}")
         except Exception:
-            pass
+            logger.exception(f"FAILED to SET active_race: {key}")
+    else:
+        logger.warning(f"SET active_race: _redis is None! key={key}")
 
 
 def _get_active_race(user_id: str, sender_id: str) -> str | None:
+    key = f"{_ACTIVE_RACE_PREFIX}{user_id}:{sender_id}"
     if _redis:
         try:
-            val = _redis.get(f"{_ACTIVE_RACE_PREFIX}{user_id}:{sender_id}")
-            return val.decode() if val else None
+            val = _redis.get(key)
+            # decode_responses=True means val is already str (not bytes)
+            result = val if val else None
+            logger.info(f"GET active_race: {key} = {result}")
+            return result
         except Exception:
-            pass
+            logger.exception(f"FAILED to GET active_race: {key}")
+    else:
+        logger.warning(f"GET active_race: _redis is None! key={key}")
     return None
 
 
@@ -251,16 +262,22 @@ def _load_history(user_id: str, sender_id: str) -> list[dict]:
             raw = _redis.get(_redis_key(user_id, sender_id))
             if raw:
                 history = json.loads(raw)
-                # Guard: discard history containing Anthropic-format tool_result
-                # blocks that are incompatible with OpenAI API
+                # Strip tool_use and tool_result blocks from history.
+                # These are Anthropic-format blocks that cause issues on reload.
+                # Keep only text blocks for conversation context.
+                cleaned = []
                 for msg in history:
                     content = msg.get("content")
                     if isinstance(content, list):
-                        for b in content:
-                            if isinstance(b, dict) and b.get("type") == "tool_result":
-                                logger.info("Discarding old Anthropic-format MYBOT history")
-                                return []
-                return history
+                        text_blocks = [
+                            b for b in content
+                            if isinstance(b, dict) and b.get("type") == "text"
+                        ]
+                        if text_blocks:
+                            cleaned.append({"role": msg.get("role"), "content": text_blocks})
+                    elif isinstance(content, str) and content.strip():
+                        cleaned.append(msg)
+                return cleaned
         except Exception:
             logger.exception("Failed to load MYBOT history from Redis")
     return []
@@ -385,7 +402,7 @@ def _push(access_token: str, sender_id: str, text: str, quick_reply: QuickReply 
 # MYBOT tool notification (IMLogic label override)
 # ---------------------------------------------------------------------------
 
-def _format_mybot_tool_notification(tool_names: list[str], bot_name: str) -> str:
+def _format_mybot_tool_notification(tool_names: list[str], bot_name: str, tone: str = "casual") -> str:
     """Like format_tool_notification but replaces get_predictions label with IMLogic."""
     from agent.engine import TOOL_LABELS, HEAVY_TOOLS
 
@@ -399,11 +416,11 @@ def _format_mybot_tool_notification(tool_names: list[str], bot_name: str) -> str
     has_heavy = any(name in HEAVY_TOOLS for name in tool_names)
 
     if has_heavy:
-        msg = "⚡ エンジン起動中...\n"
+        msg = get_msg(tone, "tool_heavy_prefix") + "\n"
         msg += "\n".join(f"  → {l}" for l in labels)
-        msg += "\n少し待ってな（10〜30秒くらい）"
+        msg += "\n" + get_msg(tone, "tool_heavy_suffix")
     else:
-        msg = "🔍 データ取得中...\n"
+        msg = get_msg(tone, "tool_light_prefix") + "\n"
         msg += "\n".join(f"  → {l}" for l in labels)
 
     return msg
@@ -422,6 +439,7 @@ def _process_message(
     profile: dict,
 ):
     """Run MYBOT agent loop in a background thread and push the result."""
+    tone = bot_settings.get("tone", "casual")
     try:
         history = _load_history(user_id, sender_id)
         _bot_name = bot_settings.get("bot_name", "MYBOT")
@@ -441,6 +459,11 @@ def _process_message(
             chunk_type = chunk.get("type")
 
             if chunk_type == "tool":
+                # Save active_race_id immediately so honmei handler can find it
+                tool_race_id = chunk.get("race_id")
+                if tool_race_id:
+                    _set_active_race(user_id, sender_id, tool_race_id)
+
                 tool_name = chunk.get("name", "")
                 if tool_name and tool_name not in notified_tools:
                     notified_tools.add(tool_name)
@@ -454,7 +477,7 @@ def _process_message(
                             if not tools:
                                 return
                             try:
-                                notice = _format_mybot_tool_notification(tools, _bot_name)
+                                notice = _format_mybot_tool_notification(tools, _bot_name, tone)
                                 _push(access_token, sender_id, notice)
                             except Exception:
                                 logger.exception("Failed to send MYBOT tool notification")
@@ -497,7 +520,7 @@ def _process_message(
                                 "\n\n━━━━━━━━\n"
                                 "📢 みんなの予想\n"
                                 "━━━━━━━━\n\n"
-                                "お前の本命を教えてくれ！👇"
+                                + get_msg(tone, "honmei_prompt")
                             )
                             qr = honmei_qr
 
@@ -510,7 +533,7 @@ def _process_message(
     except Exception:
         logger.exception(f"Error in MYBOT background processing user_id={user_id}")
         try:
-            _push(access_token, sender_id, "ごめん、ちょっとエラーが出ちゃった。もう一回言ってもらえる？")
+            _push(access_token, sender_id, get_msg(tone, "error"))
         except Exception:
             logger.exception("Failed to send MYBOT error message")
 
@@ -695,6 +718,7 @@ def handle_mybot_webhook(user_id: str):
         bot_settings = {}
 
     bot_name = bot_settings.get("bot_name", "MYBOT")
+    tone = bot_settings.get("tone", "casual")
 
     # ── Maintenance gate ──
     try:
@@ -864,6 +888,7 @@ def handle_mybot_webhook(user_id: str):
 
             # --- Honmei (本命) selection handler ---
             if user_text.startswith("本命 ") or user_text.startswith("本命:"):
+                logger.info(f"MYBOT honmei attempt: user_id={user_id} sender_id={sender_id} text={user_text[:50]}")
                 match = re.match(r"本命[:\s]+(\d+)番?\s*(.*)", user_text)
                 if not match:
                     _reply(access_token, reply_token, "馬番がわからなかった...もう一回タップしてくれ！")
@@ -873,18 +898,33 @@ def handle_mybot_webhook(user_id: str):
                 horse_name = match.group(2).strip() or f"{horse_number}番"
 
                 race_id = _get_active_race(user_id, sender_id)
+                logger.info(f"MYBOT honmei: active_race={race_id} (from Redis key mybot:active_race:{user_id}:{sender_id})")
                 if not race_id:
                     history = _load_history(user_id, sender_id)
                     race_id = find_race_id(history)
+                    logger.info(f"MYBOT honmei: find_race_id from history={race_id} (history len={len(history)})")
 
+                # Fallback: search raw Redis history for race_id pattern
+                if not race_id and _redis:
+                    try:
+                        raw = _redis.get(_redis_key(user_id, sender_id))
+                        if raw:
+                            import re as _re
+                            raw_str = raw if isinstance(raw, str) else raw.decode("utf-8", errors="ignore")
+                            matches = _re.findall(r'20\d{6}-[^\s",:}{]+?-\d{1,2}', raw_str)
+                            logger.info(f"MYBOT honmei: raw fallback matches={matches[-3:] if matches else []}")
+                            if matches:
+                                race_id = matches[-1]
+                    except Exception:
+                        logger.exception("MYBOT honmei: raw fallback error")
+
+                logger.info(f"MYBOT honmei: final race_id={race_id}")
                 if not race_id:
-                    _reply(access_token, reply_token,
-                           "どのレースの本命か分からなかった。先にレースを見てから選んでくれ！")
+                    _reply(access_token, reply_token, get_msg(tone, "honmei_no_race"))
                     continue
 
                 if profile.get("fallback"):
-                    _reply(access_token, reply_token,
-                           "今ちょっと登録が不安定みたいだ。少し時間おいてもう一回お願い！")
+                    _reply(access_token, reply_token, get_msg(tone, "honmei_unstable"))
                     continue
 
                 from tools.executor import _race_cache
@@ -908,12 +948,10 @@ def handle_mybot_webhook(user_id: str):
                 if record:
                     _clear_active_race(user_id, sender_id)
                     _reply(access_token, reply_token,
-                           f"👊 {horse_number}番 {horse_name} を本命で登録したぜ！\n\n"
-                           "みんなの予想に追加したからな。結果出たら回収率も計算してやるよ。")
+                           get_msg(tone, "honmei_registered", num=horse_number, name=horse_name))
                     logger.info(f"MYBOT honmei: user={sender_id} race={race_id} horse={horse_number} {horse_name}")
                 else:
-                    _reply(access_token, reply_token,
-                           "ごめん、登録でエラーが出ちゃった。もう一回試してくれ！")
+                    _reply(access_token, reply_token, get_msg(tone, "error"))
                 continue
 
             # --- Honmei blocking: pending pick ---
@@ -924,17 +962,13 @@ def handle_mybot_webhook(user_id: str):
                     if honmei_qr:
                         _reply(
                             access_token, reply_token,
-                            "おっと、ちょっと待ってくれ！\n\n"
-                            "「みんなの予想」を集めてるんだ。\n"
-                            "みんなの本命を集計して、回収率ランキングを出していく予定なんだよ。\n\n"
-                            "どうか協力してやってくれ🙏\n\n"
-                            "👇 下のボタンから本命をタップ！",
+                            get_msg(tone, "honmei_blocking"),
                             quick_reply=honmei_qr,
                         )
                         continue
 
             # --- Normal message: reply with thinking + run agent ---
-            _reply(access_token, reply_token, "考え中...")
+            _reply(access_token, reply_token, get_msg(tone, "thinking"))
 
             # Process in background thread
             thread = threading.Thread(

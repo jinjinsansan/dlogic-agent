@@ -49,6 +49,12 @@ logger = logging.getLogger(__name__)
 configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
+# Rich Menu IDs (set via setup_richmenus_all.py → .env.local)
+import os as _os
+RICHMENU_NORMAL_ID = _os.environ.get("RICHMENU_NORMAL_ID", "")
+RICHMENU_WAITLIST_ID = _os.environ.get("RICHMENU_WAITLIST_ID", "")
+RICHMENU_MAINTENANCE_ID = _os.environ.get("RICHMENU_MAINTENANCE_ID", "")
+
 # In-memory conversation storage (keyed by LINE user ID)
 user_conversations: dict[str, list[dict]] = {}
 
@@ -365,6 +371,79 @@ def get_start_quick_reply() -> QuickReply:
 
 
 # ---------------------------------------------------------------------------
+# Rich Menu switching
+# ---------------------------------------------------------------------------
+
+def _link_richmenu(user_id: str, richmenu_id: str):
+    """Link a specific rich menu to a user."""
+    if not richmenu_id:
+        return
+    try:
+        import requests as _req
+        _req.post(
+            f"https://api.line.me/v2/bot/user/{user_id}/richmenu/{richmenu_id}",
+            headers={"Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"},
+            timeout=5,
+        )
+        logger.info(f"Rich menu linked: {user_id[:10]}... → {richmenu_id[:10]}...")
+    except Exception:
+        logger.exception("Failed to link rich menu")
+
+
+def _unlink_richmenu(user_id: str):
+    """Unlink user's rich menu (reverts to default)."""
+    try:
+        import requests as _req
+        _req.delete(
+            f"https://api.line.me/v2/bot/user/{user_id}/richmenu",
+            headers={"Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"},
+            timeout=5,
+        )
+        logger.info(f"Rich menu unlinked: {user_id[:10]}... (back to default)")
+    except Exception:
+        logger.exception("Failed to unlink rich menu")
+
+
+def set_default_richmenu(richmenu_id: str):
+    """Set a rich menu as default for ALL users."""
+    if not richmenu_id:
+        return
+    try:
+        import requests as _req
+        _req.post(
+            f"https://api.line.me/v2/bot/user/all/richmenu/{richmenu_id}",
+            headers={"Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"},
+            timeout=5,
+        )
+        logger.info(f"Default rich menu set: {richmenu_id[:10]}...")
+    except Exception:
+        logger.exception("Failed to set default rich menu")
+
+
+def switch_to_waitlist_menu(user_id: str):
+    """Switch a user to the waitlist rich menu."""
+    if RICHMENU_WAITLIST_ID:
+        _link_richmenu(user_id, RICHMENU_WAITLIST_ID)
+
+
+def switch_to_normal_menu(user_id: str):
+    """Switch a user back to the normal rich menu (unlink = use default)."""
+    _unlink_richmenu(user_id)
+
+
+def enable_maintenance_menu():
+    """Switch ALL users to maintenance rich menu."""
+    if RICHMENU_MAINTENANCE_ID:
+        set_default_richmenu(RICHMENU_MAINTENANCE_ID)
+
+
+def disable_maintenance_menu():
+    """Restore ALL users to normal rich menu."""
+    if RICHMENU_NORMAL_ID:
+        set_default_richmenu(RICHMENU_NORMAL_ID)
+
+
+# ---------------------------------------------------------------------------
 # LINE messaging helpers
 # ---------------------------------------------------------------------------
 
@@ -557,6 +636,7 @@ def handle_follow(event: FollowEvent):
     if not profile.get("fallback"):
         status = _safe_db_call(get_user_status, profile["id"], default="active") or "active"
     if status == "waitlist":
+        switch_to_waitlist_menu(user_id)
         _reply(
             event.reply_token,
             f"よう、{display_name}！はじめまして！\n\n"

@@ -30,7 +30,10 @@ bp = Blueprint("auth", __name__)
 
 LINE_LOGIN_CHANNEL_ID = os.getenv("LINE_LOGIN_CHANNEL_ID", "")
 LINE_LOGIN_CHANNEL_SECRET = os.getenv("LINE_LOGIN_CHANNEL_SECRET", "")
-WEB_AUTH_SECRET = os.getenv("WEB_AUTH_SECRET", "dlogic-web-auth-secret-key-2026")
+WEB_AUTH_SECRET = os.getenv("WEB_AUTH_SECRET", "")
+if not WEB_AUTH_SECRET:
+    logger.critical("WEB_AUTH_SECRET is not set! Authentication will fail.")
+    WEB_AUTH_SECRET = os.urandom(32).hex()  # Fallback to random (tokens won't persist across restarts)
 
 TOKEN_EXPIRY = 7 * 24 * 3600  # 7 days
 
