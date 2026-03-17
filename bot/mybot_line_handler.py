@@ -32,7 +32,7 @@ from config import TELEGRAM_BOT_TOKEN, ADMIN_TELEGRAM_CHAT_ID
 from db.supabase_client import get_client
 from db.encryption import decrypt_value
 from db.redis_client import get_redis
-from db.user_manager import get_user_status, get_or_create_user as db_get_or_create_user
+from db.user_manager import get_user_status, get_or_create_user as db_get_or_create_user, is_maintenance_mode, get_maintenance_message
 from db.prediction_manager import (
     record_prediction as db_record_prediction,
     check_prediction as db_check_prediction,
@@ -695,6 +695,19 @@ def handle_mybot_webhook(user_id: str):
         bot_settings = {}
 
     bot_name = bot_settings.get("bot_name", "MYBOT")
+
+    # ── Maintenance gate ──
+    try:
+        if is_maintenance_mode():
+            msg = get_maintenance_message() or "ただいまメンテナンス中です。"
+            for ev in events:
+                rt = ev.get("replyToken", "")
+                if rt:
+                    _reply(access_token, rt, f"🔧 {msg}")
+                    break
+            return "OK", 200
+    except Exception:
+        pass  # fail-open
 
     # ── Waitlist gate: BOT owner must be active ──
     try:

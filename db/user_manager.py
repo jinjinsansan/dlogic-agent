@@ -265,20 +265,28 @@ def update_profile_field(profile_id: str, field: str, value) -> None:
 
 
 def increment_predictions(profile_id: str) -> None:
-    """Increment total_predictions counter."""
+    """Increment total_predictions counter (atomic via RPC, fallback to read-then-write)."""
     sb = get_client()
-    # Fetch current value then increment
-    res = sb.table("user_profiles") \
-        .select("total_predictions") \
-        .eq("id", profile_id) \
-        .limit(1) \
-        .execute()
-    if res.data:
-        current = res.data[0]["total_predictions"] or 0
-        sb.table("user_profiles") \
-            .update({"total_predictions": current + 1}) \
+    try:
+        # Try atomic increment via Supabase RPC (requires increment_field function)
+        sb.rpc("increment_field", {
+            "row_id": profile_id,
+            "table_name": "user_profiles",
+            "field_name": "total_predictions",
+        }).execute()
+    except Exception:
+        # Fallback: read-then-write (acceptable race window for a counter)
+        res = sb.table("user_profiles") \
+            .select("total_predictions") \
             .eq("id", profile_id) \
+            .limit(1) \
             .execute()
+        if res.data:
+            current = res.data[0]["total_predictions"] or 0
+            sb.table("user_profiles") \
+                .update({"total_predictions": current + 1}) \
+                .eq("id", profile_id) \
+                .execute()
 
 
 # ---------------------------------------------------------------------------

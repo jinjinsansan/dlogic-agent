@@ -77,14 +77,30 @@ FRAME_COLORS = {
 
 @flask_app.route("/callback", methods=["POST"])
 def callback():
+    import base64
+    import hashlib
+    import hmac as _hmac
+
     signature = request.headers.get("X-Line-Signature", "")
     body = request.get_data(as_text=True)
     logger.info(f"LINE webhook: {body[:200]}")
-    try:
-        line_handler.handle(body, signature)
-    except InvalidSignatureError:
+
+    # Validate signature synchronously (fast, no SDK private-attribute dependency)
+    from config import LINE_CHANNEL_SECRET as _secret
+    gen_sig = base64.b64encode(
+        _hmac.new(_secret.encode("utf-8"), body.encode("utf-8"), hashlib.sha256).digest()
+    ).decode("utf-8")
+    if not _hmac.compare_digest(signature, gen_sig):
         logger.error("Invalid LINE signature")
         abort(400)
+
+    # Process events asynchronously via gevent so LINE gets 200 OK within 1 second
+    try:
+        import gevent
+        gevent.spawn(line_handler.handle, body, signature)
+    except ImportError:
+        # Local dev without gevent — fall back to synchronous
+        line_handler.handle(body, signature)
     return "OK"
 
 

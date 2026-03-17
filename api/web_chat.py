@@ -28,6 +28,7 @@ from db.user_manager import (
     get_or_create_user, get_or_create_user_by_login,
     build_user_context as db_build_user_context,
     sync_profiles,
+    is_maintenance_mode, get_maintenance_message,
 )
 
 logger = logging.getLogger(__name__)
@@ -122,6 +123,19 @@ def chat():
     # Periodic cleanup
     if len(_sessions) > 100:
         _cleanup_old_sessions()
+
+    # Maintenance mode check
+    try:
+        if is_maintenance_mode():
+            msg = get_maintenance_message() or "ただいまメンテナンス中です。"
+            def _maint_response():
+                yield f"data: {json.dumps({'type': 'text', 'content': f'🔧 {msg}'}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'session_id': session_id, 'quick_replies': []}, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+            return Response(_maint_response(), mimetype="text/event-stream",
+                            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    except Exception:
+        pass  # fail-open: if DB is down, allow requests through
 
     auth_payload = verify_auth_header()
     session = _get_or_create_session(session_id, auth_payload)

@@ -54,9 +54,23 @@ PREFETCH_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'd
 #   "realtime": { "odds": {...}, "track_condition": "...", "fetched_at": float },  # TTL
 # }
 _race_cache: dict[str, dict] = {}
+_MAX_RACE_CACHE_SIZE = 100  # evict oldest when exceeded
 
 # TTL for realtime data (odds, track_condition)
 _REALTIME_TTL = 300  # 5 minutes
+
+
+def _evict_race_cache():
+    """Evict oldest entries when cache exceeds max size."""
+    if len(_race_cache) <= _MAX_RACE_CACHE_SIZE:
+        return
+    # Remove oldest entries (by race_id sort = chronological for YYYYMMDD-based IDs)
+    sorted_keys = sorted(_race_cache.keys())
+    to_remove = sorted_keys[:len(sorted_keys) - _MAX_RACE_CACHE_SIZE]
+    for key in to_remove:
+        del _race_cache[key]
+    if to_remove:
+        logger.info(f"Race cache eviction: removed {len(to_remove)} entries, {len(_race_cache)} remaining")
 
 
 # Display engine brand names
@@ -68,8 +82,9 @@ ENGINE_LABEL_MAP = {
 }
 
 
-# Cache for custom → netkeiba race_id resolution
+# Cache for custom → netkeiba race_id resolution (bounded)
 _netkeiba_id_cache: dict[str, str] = {}
+_MAX_NETKEIBA_CACHE_SIZE = 200
 
 
 def _resolve_netkeiba_race_id(race_id: str, race_type: str = "jra") -> str:
@@ -127,6 +142,8 @@ def _resolve_netkeiba_race_id(race_id: str, race_type: str = "jra") -> str:
         for r in races:
             if r.venue == venue and r.race_number == race_number:
                 _netkeiba_id_cache[race_id] = r.race_id
+                if len(_netkeiba_id_cache) > _MAX_NETKEIBA_CACHE_SIZE:
+                    _netkeiba_id_cache.clear()
                 logger.info(f"Resolved via scraper: {race_id} → {r.race_id}")
                 return r.race_id
 
@@ -970,6 +987,7 @@ def _cache_race_data(race_id: str, entries: list[dict], race_info: dict):
     """Cache race entry data for later use by analysis tools."""
     if race_id not in _race_cache:
         _race_cache[race_id] = {}
+        _evict_race_cache()
 
     # Detect race_type from venue name
     venue = race_info.get("venue", "")

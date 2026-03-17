@@ -153,6 +153,9 @@ def get(race_id: str, query_type: str) -> dict | None:
     return entry
 
 
+_MAX_CACHE_RACES = 200  # auto-cleanup when exceeded
+
+
 def save(race_id: str, query_type: str, text: str, footer: str, tools_used: list[str]):
     """Save response to cache."""
     cache = _load_file()
@@ -162,6 +165,17 @@ def save(race_id: str, query_type: str, text: str, footer: str, tools_used: list
         "tools_used": tools_used,
         "ts": time.time(),
     }
+    # Auto-cleanup when cache grows too large
+    if len(cache) > _MAX_CACHE_RACES:
+        cutoff = time.time() - 48 * 3600  # remove entries older than 48h
+        to_delete = [
+            rid for rid, queries in cache.items()
+            if all(e.get("ts", 0) < cutoff for e in queries.values())
+        ]
+        for rid in to_delete:
+            del cache[rid]
+        if to_delete:
+            logger.info(f"ResponseCache auto-cleanup: removed {len(to_delete)} stale races")
     _save_file(cache)
     logger.info(f"ResponseCache SAVE: {race_id}:{query_type}")
 

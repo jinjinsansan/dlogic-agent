@@ -54,6 +54,7 @@ user_conversations: dict[str, list[dict]] = {}
 
 # In-memory cache of profile_id per LINE user (avoids repeated DB lookups within session)
 _profile_cache: dict[str, dict] = {}
+_MAX_PROFILE_CACHE = 500
 
 # Track active race_id per user for honmei selection
 _user_active_race: dict[str, str] = {}
@@ -128,6 +129,7 @@ def _save_history(user_id: str, history: list[dict]) -> None:
         except Exception:
             logger.exception("Failed to save history to Redis")
     user_conversations[user_id] = normalized
+    _evict_conversations()
 
 
 def _get_active_race(user_id: str) -> str | None:
@@ -148,6 +150,12 @@ def _set_active_race(user_id: str, race_id: str) -> None:
         except Exception:
             logger.exception("Failed to save active race to Redis")
     _user_active_race[user_id] = race_id
+    if len(_user_active_race) > _MAX_ACTIVE_RACE:
+        to_remove = list(_user_active_race.keys())[:200]
+        for k in to_remove:
+            del _user_active_race[k]
+    if len(_daily_greeted) > _MAX_DAILY_GREETED:
+        _daily_greeted.clear()
 
 
 def _clear_active_race(user_id: str) -> None:
@@ -492,9 +500,38 @@ def _handle_honmei_selection(event, user_id: str, text: str, profile: dict):
 # Event handlers
 # ---------------------------------------------------------------------------
 
+def _evict_profile_cache():
+    """Evict oldest entries when profile cache exceeds limit."""
+    if len(_profile_cache) <= _MAX_PROFILE_CACHE:
+        return
+    # Remove ~20% of entries (no timestamp, just trim arbitrarily)
+    to_remove = list(_profile_cache.keys())[:len(_profile_cache) - _MAX_PROFILE_CACHE + 50]
+    for key in to_remove:
+        del _profile_cache[key]
+    logger.info(f"Profile cache evicted {len(to_remove)} entries, now {len(_profile_cache)}")
+
+
+_MAX_CONVERSATIONS = 500  # limit in-memory fallback conversation store
+
+
+def _evict_conversations():
+    """Evict oldest entries when user_conversations exceeds limit."""
+    if len(user_conversations) <= _MAX_CONVERSATIONS:
+        return
+    to_remove = list(user_conversations.keys())[:len(user_conversations) - _MAX_CONVERSATIONS + 50]
+    for key in to_remove:
+        del user_conversations[key]
+    logger.info(f"Conversations evicted {len(to_remove)} entries, now {len(user_conversations)}")
+
+
+_MAX_ACTIVE_RACE = 1000
+_MAX_DAILY_GREETED = 1000
+
+
 def _get_profile(user_id: str, display_name: str) -> dict:
     """Get or create user profile, with in-memory caching."""
     if user_id not in _profile_cache:
+        _evict_profile_cache()
         try:
             _profile_cache[user_id] = db_get_or_create_user(user_id, display_name)
         except Exception:
