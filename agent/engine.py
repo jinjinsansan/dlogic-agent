@@ -246,15 +246,15 @@ def _get_openai_tools():
 # Public API (same interface regardless of provider)
 # ---------------------------------------------------------------------------
 
-def call_claude(conversation_history: list[dict], system: str) -> object:
+def call_claude(conversation_history: list[dict], system: str, tools: list[dict] | None = None) -> object:
     """Single LLM API call with tool use. Dispatches to Claude or OpenAI."""
     if LLM_PROVIDER == "openai":
         return _call_openai(conversation_history, system)
     else:
-        return _call_anthropic(conversation_history, system)
+        return _call_anthropic(conversation_history, system, tools=tools)
 
 
-def _call_anthropic(conversation_history: list[dict], system: str) -> object:
+def _call_anthropic(conversation_history: list[dict], system: str, tools: list[dict] | None = None) -> object:
     """Claude API call with prompt caching."""
     return _anthropic_client.messages.create(
         model=CLAUDE_MODEL,
@@ -264,7 +264,7 @@ def _call_anthropic(conversation_history: list[dict], system: str) -> object:
             "text": system,
             "cache_control": {"type": "ephemeral"},
         }],
-        tools=TOOLS,
+        tools=tools or TOOLS,
         messages=conversation_history,
     )
 
@@ -281,6 +281,48 @@ def _call_openai(conversation_history: list[dict], system: str) -> object:
         tools=_get_openai_tools(),
     )
     return _UnifiedResponse(openai_response)
+
+
+# ---------------------------------------------------------------------------
+# Dynamic tool selection — reduce input tokens by sending only relevant tools
+# ---------------------------------------------------------------------------
+
+# Phase 1 tools: needed when user hasn't selected a race yet
+_PHASE1_TOOL_NAMES = {
+    "get_today_races", "get_race_entries", "search_horse",
+    "get_my_stats", "get_prediction_ranking", "get_engine_stats", "send_inquiry",
+}
+
+# Phase 2 tools: needed after a race is selected (analysis + data)
+_PHASE2_TOOL_NAMES = {
+    "get_predictions", "get_race_results", "get_realtime_odds", "get_horse_weights",
+    "get_training_comments", "get_race_flow", "get_jockey_analysis",
+    "get_bloodline_analysis", "get_recent_runs", "get_odds_probability",
+    "get_stable_comments", "record_user_prediction", "check_user_prediction",
+}
+
+# Tool index by name for fast lookup
+_TOOL_BY_NAME = {t["name"]: t for t in TOOLS}
+
+
+def select_tools(has_race_context: bool, user_message: str = "") -> list[dict]:
+    """Select relevant tools based on conversation state to reduce token usage.
+
+    - No race context: only phase 1 tools (~7 tools instead of 18)
+    - Has race context: phase 2 tools + race list tools (for switching races)
+    - Always includes utility tools (stats, inquiry)
+    """
+    if has_race_context:
+        # Include all tools — user might want to switch races or analyze
+        return TOOLS
+
+    # No race context: skip analysis/data tools that require race_id
+    # But check message for keywords that might need phase 2
+    _RACE_HINTS = ("予想", "展開", "騎手", "血統", "過去", "オッズ", "馬体重", "勝率", "結果")
+    if any(hint in user_message for hint in _RACE_HINTS):
+        return TOOLS  # Might need everything
+
+    return [_TOOL_BY_NAME[name] for name in _PHASE1_TOOL_NAMES if name in _TOOL_BY_NAME]
 
 
 def build_system_prompt(user_context: str = "") -> str:
@@ -402,14 +444,81 @@ def extract_memories(user_message: str, assistant_response: str) -> list[str]:
         return []
 
 
+def _compress_tool_result(content: str, max_len: int = 800) -> str:
+    """Compress a tool_result string to save tokens on subsequent API calls.
+
+    Keeps the first max_len characters and appends a truncation notice.
+    JSON results are truncated at a sensible boundary.
+    """
+    if not isinstance(content, str) or len(content) <= max_len:
+        return content
+    # Try to truncate at last complete JSON object/array boundary
+    truncated = content[:max_len]
+    # Add notice so Claude knows data was truncated
+    return truncated + "\n...[データ省略]"
+
+
+def _compress_old_tool_results(history: list[dict], keep_recent: int = 4) -> list[dict]:
+    """Compress tool_result content in older messages to reduce input tokens.
+
+    Keeps the most recent `keep_recent` messages untouched.
+    Older tool_result blocks get their content truncated.
+    """
+    if len(history) <= keep_recent:
+        return history
+
+    compressed = []
+    cutoff = len(history) - keep_recent
+
+    for i, msg in enumerate(history):
+        if i >= cutoff:
+            # Recent messages: keep as-is
+            compressed.append(msg)
+            continue
+
+        content = msg.get("content")
+        if msg.get("role") == "user" and isinstance(content, list):
+            new_blocks = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    block = dict(block)  # shallow copy
+                    block["content"] = _compress_tool_result(block.get("content", ""))
+                    new_blocks.append(block)
+                else:
+                    new_blocks.append(block)
+            compressed.append({"role": msg["role"], "content": new_blocks})
+        elif msg.get("role") == "assistant" and isinstance(content, list):
+            # Compress tool_use input in old assistant messages too
+            new_blocks = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    block = dict(block)
+                    inp = block.get("input", {})
+                    if isinstance(inp, dict):
+                        # Keep only race_id and race_type from old tool calls
+                        minimal = {}
+                        for k in ("race_id", "race_type", "horse_number", "horse_name"):
+                            if k in inp:
+                                minimal[k] = inp[k]
+                        block["input"] = minimal or inp
+                    new_blocks.append(block)
+                else:
+                    new_blocks.append(block)
+            compressed.append({"role": msg["role"], "content": new_blocks})
+        else:
+            compressed.append(msg)
+
+    return compressed
+
+
 def trim_history(conversation_history: list[dict], max_turns: int = 10) -> list[dict]:
     """Trim conversation history to keep only the last N turns to manage context size.
 
     Ensures we never split tool_use/tool_result pairs, which would cause
-    API 400 errors.
+    API 400 errors. Also compresses old tool results to save tokens.
     """
     if len(conversation_history) <= max_turns * 2:
-        return conversation_history
+        return _compress_old_tool_results(conversation_history)
 
     trimmed = conversation_history[-(max_turns * 2):]
 
@@ -426,4 +535,4 @@ def trim_history(conversation_history: list[dict], max_turns: int = 10) -> list[
             continue
         break
 
-    return trimmed
+    return _compress_old_tool_results(trimmed)

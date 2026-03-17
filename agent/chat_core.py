@@ -13,6 +13,7 @@ import random
 from agent.engine import (
     call_claude, build_system_prompt, extract_text, get_tool_blocks,
     format_tools_used_footer, trim_history, extract_memories, HEAVY_TOOLS,
+    select_tools,
 )
 from agent.response_cache import (
     detect_query_type, find_race_id,
@@ -212,13 +213,21 @@ def run_agent(
             if result.get("footer"):
                 full_text += "\n\n" + result["footer"]
 
+            # Save template results to response cache too
+            template_race_id = result.get("active_race_id")
+            if template_race_id:
+                save_qt = detect_query_type(user_message)
+                if save_qt:
+                    save_cached_response(template_race_id, save_qt,
+                                         result["text"], result.get("footer", ""), result["tools_used"])
+
             yield {
                 "type": "done",
                 "text": full_text,
                 "raw_text": result["text"],
                 "footer": result.get("footer", ""),
                 "tools_used": result["tools_used"],
-                "active_race_id": result.get("active_race_id"),
+                "active_race_id": template_race_id,
                 "history": history,
                 "cache_used": False,
                 "quick_replies": get_web_quick_replies(result["tools_used"]),
@@ -265,8 +274,12 @@ def run_agent(
     cache_used = False
     tool_context = {"user_profile_id": profile_id}
 
+    # Dynamic tool selection: send fewer tools when no race is active
+    has_race = bool(active_race_id_hint)
+    selected_tools = select_tools(has_race, user_message)
+
     for turn in range(MAX_TOOL_TURNS):
-        response = call_claude(history, system)
+        response = call_claude(history, system, tools=selected_tools)
 
         if response.stop_reason == "end_turn":
             history.append({"role": "assistant", "content": response.content})
@@ -318,6 +331,11 @@ def run_agent(
             })
 
         history.append({"role": "user", "content": tool_results})
+
+        # After first tool turn with race_id, upgrade to full tools
+        if active_race_id and not has_race:
+            has_race = True
+            selected_tools = select_tools(True, user_message)
 
     # Build final response
     if cache_used:

@@ -6,6 +6,7 @@ Similar to chat_core.run_agent but:
 - Uses IMLogic prediction API instead of standard 4-engine predictions
 """
 
+import json
 import logging
 
 from agent.engine import (
@@ -13,6 +14,11 @@ from agent.engine import (
     trim_history,
 )
 from agent.chat_core import get_mybot_web_quick_replies
+from agent.response_cache import (
+    detect_query_type, find_race_id,
+    get as get_cached_response, save as save_cached_response,
+    TOOL_QUERY_MAP,
+)
 from config import MAX_TOOL_TURNS, DLOGIC_API_URL
 from tools.executor import execute_tool
 
@@ -278,7 +284,6 @@ def _build_mybot_system_prompt(bot_settings: dict, user_context: str = "") -> st
 
 def _execute_imlogic_prediction(race_id: str, bot_settings: dict, context: dict) -> str:
     """Execute IMLogic prediction with user's custom weights."""
-    import json
     import requests
     from tools.executor import _race_cache
 
@@ -441,6 +446,34 @@ def run_mybot_agent(
     system = _build_mybot_system_prompt(bot_settings, user_context)
     history = trim_history(history)
 
+    # ── Pre-loop cache check (shared with Dlogic) ──
+    query_type = detect_query_type(user_message)
+    if query_type:
+        race_id = find_race_id(history) or active_race_id_hint
+        if race_id:
+            cached = get_cached_response(race_id, query_type)
+            if cached:
+                logger.info(f"MYBOT pre-loop cache hit: {race_id}:{query_type}")
+                history.append({"role": "user", "content": user_message})
+                history.append({"role": "assistant", "content": cached["text"]})
+
+                full_text = cached["text"]
+                footer = _format_mybot_footer(cached["tools_used"], bot_settings)
+                if footer:
+                    full_text += "\n\n" + footer
+
+                yield {
+                    "type": "done",
+                    "text": full_text,
+                    "raw_text": cached["text"],
+                    "footer": footer,
+                    "tools_used": cached["tools_used"],
+                    "active_race_id": race_id,
+                    "history": history,
+                    "quick_replies": get_mybot_web_quick_replies(cached["tools_used"]),
+                }
+                return
+
     # Agentic loop
     history.append({"role": "user", "content": user_message})
     yield {"type": "thinking"}
@@ -448,6 +481,7 @@ def run_mybot_agent(
     tools_used = []
     response = None
     active_race_id = active_race_id_hint
+    cache_used = False
     tool_context = {"user_profile_id": profile_id}
     # Tools whose results are pre-formatted and should bypass Claude's text
     _PREFORMAT_TOOLS = {"get_odds_probability", "get_horse_weights"}
@@ -463,6 +497,26 @@ def run_mybot_agent(
         tool_blocks = get_tool_blocks(response)
         if not tool_blocks:
             history.append({"role": "assistant", "content": response.content})
+            break
+
+        # ── Mid-loop cache check ──
+        mid_cache = None
+        for tb in tool_blocks:
+            inp = tb.input if isinstance(tb.input, dict) else {}
+            rid = inp.get("race_id")
+            if rid:
+                active_race_id = rid
+            qt = TOOL_QUERY_MAP.get(tb.name)
+            if rid and qt:
+                mid_cache = get_cached_response(rid, qt)
+                if mid_cache:
+                    break
+
+        if mid_cache:
+            logger.info(f"MYBOT mid-loop cache hit: {active_race_id}")
+            history.append({"role": "assistant", "content": mid_cache["text"]})
+            tools_used = mid_cache["tools_used"]
+            cache_used = True
             break
 
         history.append({"role": "assistant", "content": response.content})
@@ -508,18 +562,29 @@ def run_mybot_agent(
         history.append({"role": "user", "content": tool_results})
 
     # Build final response
-    if last_preformatted_text:
+    if cache_used:
+        response_text = mid_cache["text"]
+        footer = _format_mybot_footer(mid_cache["tools_used"], bot_settings)
+    elif last_preformatted_text:
         # Use pre-formatted text directly, bypassing Claude's formatting
         response_text = last_preformatted_text
+        footer = _format_mybot_footer(tools_used, bot_settings)
     elif response:
         response_text = extract_text(response)
+        footer = _format_mybot_footer(tools_used, bot_settings)
     else:
         response_text = "ごめん、ちょっと調べすぎちゃった。"
+        footer = ""
     if not response_text:
         response_text = "ごめん、うまく答えられなかった。もう一回聞いてもらえる？"
 
-    footer = _format_mybot_footer(tools_used, bot_settings)
     full_text = response_text + ("\n\n" + footer if footer else "")
+
+    # ── Post-loop: save to response cache ──
+    if not cache_used and active_race_id:
+        save_qt = detect_query_type(user_message)
+        if save_qt:
+            save_cached_response(active_race_id, save_qt, response_text, footer, tools_used)
 
     yield {
         "type": "done",
