@@ -550,19 +550,29 @@ async def activate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     )
 
     # Send activation notification to each user via LINE
+    import time as _time
+    from bot.line_handlers import _push, get_start_quick_reply
+    from config import ONBOARDING_TEXT
+    notified = 0
     for user in activated:
+        line_uid = user.get("line_user_id", "")
+        if not line_uid or line_uid.startswith("login_"):
+            logger.info(f"Skip notification (no LINE ID): {user['display_name']}")
+            continue
         try:
-            from bot.line_handlers import _push, get_start_quick_reply
-            from config import ONBOARDING_TEXT
             _push(
-                user["line_user_id"],
+                line_uid,
                 "よう、待たせたな！🔥\n\n"
                 "お前の順番が来たぜ。今日から俺と一緒に勝ちにいこう！\n\n"
                 + ONBOARDING_TEXT,
                 quick_reply=get_start_quick_reply(),
             )
+            notified += 1
+            logger.info(f"Activation push sent: {user['display_name']}")
+            _time.sleep(0.3)
         except Exception:
-            logger.warning(f"Failed to notify activated user: {user['display_name']}")
+            logger.exception(f"Failed to notify activated user: {user['display_name']}")
+    await update.message.reply_text(f"📨 LINE通知: {notified}/{len(activated)}人に送信")
 
 
 async def inquiries_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -814,21 +824,28 @@ async def activate_all_command(update: Update, context: ContextTypes.DEFAULT_TYP
     )
 
     # Send activation notifications
+    import time as _time
+    from bot.line_handlers import _push, get_start_quick_reply
+    from config import ONBOARDING_TEXT
     success = 0
     for user in activated:
+        line_uid = user.get("line_user_id", "")
+        if not line_uid or line_uid.startswith("login_"):
+            logger.info(f"Skip notification (no LINE ID): {user['display_name']}")
+            continue
         try:
-            from bot.line_handlers import _push, get_start_quick_reply
-            from config import ONBOARDING_TEXT
             _push(
-                user["line_user_id"],
+                line_uid,
                 "よう、待たせたな！🔥\n\n"
                 "お前の順番が来たぜ。今日から俺と一緒に勝ちにいこう！\n\n"
                 + ONBOARDING_TEXT,
                 quick_reply=get_start_quick_reply(),
             )
             success += 1
+            logger.info(f"Activation push sent: {user['display_name']}")
+            _time.sleep(0.3)
         except Exception:
-            logger.warning(f"Failed to notify activated user: {user['display_name']}")
+            logger.exception(f"Failed to notify activated user: {user['display_name']}")
 
     await update.message.reply_text(f"📨 LINE通知完了: {success}/{len(activated)}人に送信")
 

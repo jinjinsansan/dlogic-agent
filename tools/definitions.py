@@ -166,7 +166,7 @@ TOOLS = [
     },
     {
         "name": "get_bloodline_analysis",
-        "description": "出走馬の血統分析（父・母父の産駒成績）を取得します。「血統的にはどう？」「この馬の血統は？」等の質問で必ず使ってください。race_idだけで呼べます。",
+        "description": "出走馬の血統分析（父・母父の産駒成績＋コース別成績）を取得します。馬場状態別の複勝率に加え、当該コース（会場×距離）での勝率・複勝率も返します。sire_course_stats/broodmare_course_statsがある場合は必ず言及してください。「血統的にはどう？」「この馬の血統は？」等の質問で必ず使ってください。race_idだけで呼べます。",
         "input_schema": {
             "type": "object",
             "properties": {
