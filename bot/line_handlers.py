@@ -5,6 +5,7 @@ import logging
 import re
 import time
 import threading
+import requests
 from datetime import datetime, timezone, timedelta
 
 from linebot.v3 import WebhookHandler
@@ -19,7 +20,7 @@ from linebot.v3.messaging import (
     QuickReplyItem,
     MessageAction,
 )
-from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent
+from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent, AccountLinkEvent
 
 from agent.engine import trim_history, format_tool_notification
 from agent.chat_core import run_agent
@@ -32,6 +33,11 @@ from db.user_manager import (
     get_transfer_code as db_get_transfer_code,
     transfer_account as db_transfer_account,
     sync_profiles as db_sync_profiles,
+    get_link_code_login_id,
+    touch_link_code,
+    consume_link_code,
+    link_login_id_to_profile,
+    migrate_mybot_owner,
     is_maintenance_mode,
     get_maintenance_message,
     get_user_status,
@@ -113,6 +119,23 @@ def _normalize_history(history: list[dict]) -> list[dict]:
             content = [_normalize_block(b) for b in content]
         normalized.append({"role": role, "content": content})
     return normalized
+
+
+def _issue_link_token(user_id: str) -> str | None:
+    url = f"https://api.line.me/v2/bot/user/{user_id}/linkToken"
+    try:
+        resp = requests.post(
+            url,
+            headers={"Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            logger.warning(f"LINE linkToken failed: {resp.status_code} {resp.text[:200]}")
+            return None
+        return resp.json().get("linkToken")
+    except Exception:
+        logger.exception("Failed to issue LINE linkToken")
+        return None
 
 
 def _load_history(user_id: str) -> list[dict]:
@@ -656,6 +679,34 @@ def handle_follow(event: FollowEvent):
     )
 
 
+@handler.add(AccountLinkEvent)
+def handle_account_link(event: AccountLinkEvent):
+    """Handle LINE Account Link completion event."""
+    user_id = event.source.user_id
+    link = event.link
+    result = getattr(link, "result", None)
+    nonce = getattr(link, "nonce", None)
+
+    if result != "ok" or not nonce:
+        _reply(event.reply_token, "連携に失敗したみたいだ。もう一回やってみてくれ！")
+        return
+
+    line_login_id = consume_link_code(nonce)
+    if not line_login_id:
+        _reply(event.reply_token, "連携コードの期限が切れてるみたいだ。もう一回やってくれ！")
+        return
+
+    display_name = _get_display_name(user_id)
+    profile = _get_profile(user_id, display_name)
+
+    previous_id = link_login_id_to_profile(profile["id"], line_login_id)
+    if previous_id:
+        db_sync_profiles(profile["id"], previous_id)
+        migrate_mybot_owner(previous_id, profile["id"])
+
+    _reply(event.reply_token, "連携完了！これでWebとLINEが一緒になったぜ。")
+
+
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event: MessageEvent):
     """Handle incoming text messages with agentic loop."""
@@ -672,6 +723,36 @@ def handle_message(event: MessageEvent):
     if _safe_db_call(is_maintenance_mode, default=False):
         msg = _safe_db_call(get_maintenance_message, default="ただいまメンテナンス中です。")
         _reply(event.reply_token, f"🔧 {msg}")
+        return
+
+    # ── Account link flow (allowed even if waitlist) ──
+    link_match = re.match(r"^(?:連携|アカウント連携)\s*([A-Za-z0-9]{4,10})?$", user_text)
+    if link_match:
+        code = link_match.group(1)
+        if not code:
+            _reply(
+                event.reply_token,
+                "連携コードを送ってくれ！\n"
+                "Webで発行したコードを『連携 ABC123』の形で送ればOKだ。",
+            )
+            return
+
+        line_login_id = get_link_code_login_id(code)
+        if not line_login_id:
+            _reply(event.reply_token, "連携コードが見つからないか期限切れだ。もう一回発行してくれ！")
+            return
+
+        link_token = _issue_link_token(user_id)
+        if not link_token:
+            _reply(event.reply_token, "今ちょっと連携に失敗した。時間をおいてもう一回頼む！")
+            return
+
+        touch_link_code(code)
+        link_url = f"https://access.line.me/dialog/bot/accountLink?linkToken={link_token}&nonce={code}"
+        _reply(
+            event.reply_token,
+            "このリンクを開いて連携を完了してくれ👇\n" + link_url,
+        )
         return
 
     # ── Gate 2: User status check (waitlist / suspended) ──

@@ -29,6 +29,7 @@ from db.user_manager import (
     build_user_context as db_build_user_context,
     sync_profiles,
     is_maintenance_mode, get_maintenance_message,
+    get_user_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -141,6 +142,37 @@ def chat():
     session = _get_or_create_session(session_id, auth_payload)
     profile = session["profile"]
     history = session["history"]
+
+    if auth_payload:
+        try:
+            status = get_user_status(profile["id"])
+        except Exception:
+            status = "active"
+
+        if status == "waitlist":
+            def _waitlist_response():
+                msg = (
+                    "今めちゃくちゃ登録が殺到しててよ、順番に案内してるんだ。\n"
+                    "お前の番が来たらすぐ連絡するから、もうちょい待っててくれ！💪"
+                )
+                yield f"data: {json.dumps({'type': 'text', 'content': msg}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'session_id': session_id, 'quick_replies': []}, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+            return Response(_waitlist_response(), mimetype="text/event-stream",
+                            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+        if status == "suspended":
+            def _suspended_response():
+                msg = (
+                    "悪いな、お前のアカウントは今ちょっと止まってるんだ。\n"
+                    "何かあったらここから連絡してくれ👇\n"
+                    "https://lin.ee/73wrNkv"
+                )
+                yield f"data: {json.dumps({'type': 'text', 'content': msg}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'session_id': session_id, 'quick_replies': []}, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+            return Response(_suspended_response(), mimetype="text/event-stream",
+                            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     # --- Handle 「引き継ぎコード」request (no code provided) → redirect to LINE app ---
     if message in ("引き継ぎコード", "引継ぎコード", "連携コード", "アカウント連携", "記憶コピー", "記憶コピーコード"):

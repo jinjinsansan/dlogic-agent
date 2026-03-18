@@ -19,6 +19,7 @@ from db.supabase_client import get_client
 from db.user_manager import (
     get_or_create_user,
     get_or_create_user_by_login,
+    create_link_code,
     link_login_to_profile,
     merge_profiles,
 )
@@ -356,4 +357,24 @@ def link_account():
             "display_name": target_profile["display_name"],
             "visit_count": target_profile["visit_count"],
         },
+    })
+
+
+@bp.route("/api/chatauth/link-request", methods=["POST"])
+def link_request():
+    """Create a one-time link code for LINE account linking."""
+    payload = verify_auth_header()
+    if not payload:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    line_login_id = payload["lid"]
+    if not line_login_id:
+        return jsonify({"error": "LINE Login ID not found"}), 400
+
+    code = create_link_code(line_login_id)
+
+    return jsonify({
+        "link_code": code,
+        "expires_in": 600,
+        "message": f"LINEのDロジくんに『連携 {code}』と送ってください",
     })

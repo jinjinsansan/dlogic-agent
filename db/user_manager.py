@@ -3,10 +3,16 @@
 import logging
 import random
 import string
+import time
 from datetime import datetime, timezone
 from db.supabase_client import get_client
+from db.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
+
+_redis = get_redis()
+_LINK_CODE_TTL = 10 * 60
+_link_code_cache: dict[str, tuple[str, float]] = {}
 
 
 def _generate_transfer_code() -> str:
@@ -24,6 +30,71 @@ def _generate_transfer_code() -> str:
             return code
     # Fallback: 8 chars if 6-char collisions (extremely unlikely)
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+
+
+def _generate_link_code(length: int = 6) -> str:
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
+
+
+def _link_code_key(code: str) -> str:
+    return f"line:link:{code}"
+
+
+def create_link_code(line_login_id: str) -> str:
+    for _ in range(10):
+        code = _generate_link_code()
+        if _redis:
+            if _redis.get(_link_code_key(code)):
+                continue
+            _redis.setex(_link_code_key(code), _LINK_CODE_TTL, line_login_id)
+        else:
+            if code in _link_code_cache and _link_code_cache[code][1] > time.time():
+                continue
+            _link_code_cache[code] = (line_login_id, time.time() + _LINK_CODE_TTL)
+        return code
+    return _generate_link_code(8)
+
+
+def get_link_code_login_id(code: str) -> str | None:
+    if not code:
+        return None
+    if _redis:
+        val = _redis.get(_link_code_key(code))
+        return val.decode("utf-8") if val else None
+    entry = _link_code_cache.get(code)
+    if not entry:
+        return None
+    line_login_id, expires_at = entry
+    if time.time() > expires_at:
+        _link_code_cache.pop(code, None)
+        return None
+    return line_login_id
+
+
+def touch_link_code(code: str) -> None:
+    if not code:
+        return
+    if _redis:
+        _redis.expire(_link_code_key(code), _LINK_CODE_TTL)
+        return
+    entry = _link_code_cache.get(code)
+    if entry:
+        _link_code_cache[code] = (entry[0], time.time() + _LINK_CODE_TTL)
+
+
+def consume_link_code(code: str) -> str | None:
+    if not code:
+        return None
+    if _redis:
+        key = _link_code_key(code)
+        val = _redis.get(key)
+        if val:
+            _redis.delete(key)
+            return val.decode("utf-8")
+        return None
+    line_login_id = get_link_code_login_id(code)
+    _link_code_cache.pop(code, None)
+    return line_login_id
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +142,7 @@ def get_or_create_user(line_user_id: str, display_name: str) -> dict:
         "display_name": display_name,
         "visit_count": 1,
         "transfer_code": code,
+        "status": "waitlist",
     }
     res = sb.table("user_profiles").insert(new_user).execute()
     logger.info(f"New LINE user created: {display_name} ({line_user_id[:10]}...) code={code}")
@@ -116,6 +188,7 @@ def get_or_create_user_by_login(line_login_id: str, display_name: str) -> dict:
         "display_name": display_name,
         "visit_count": 1,
         "transfer_code": code,
+        "status": "waitlist",
     }
     res = sb.table("user_profiles").insert(new_user).execute()
     logger.info(f"New web user created: {display_name} (login_id={line_login_id[:10]}...)")
@@ -160,6 +233,37 @@ def link_login_to_profile(profile_id: str, line_login_id: str) -> bool:
     except Exception:
         logger.exception(f"Failed to link login_id to profile {profile_id}")
         return False
+
+
+def link_login_id_to_profile(profile_id: str, line_login_id: str) -> str | None:
+    """Force-link line_login_id to a target profile, clearing it from others.
+
+    Returns the previous profile_id that held line_login_id (if any).
+    """
+    sb = get_client()
+    try:
+        res = sb.table("user_profiles") \
+            .select("id") \
+            .eq("line_login_id", line_login_id) \
+            .limit(1) \
+            .execute()
+        previous_id = res.data[0]["id"] if res.data else None
+
+        if previous_id and previous_id != profile_id:
+            sb.table("user_profiles") \
+                .update({"line_login_id": None}) \
+                .eq("id", previous_id) \
+                .execute()
+
+        sb.table("user_profiles") \
+            .update({"line_login_id": line_login_id}) \
+            .eq("id", profile_id) \
+            .execute()
+
+        return previous_id if previous_id != profile_id else None
+    except Exception:
+        logger.exception(f"Failed to force-link login_id to profile {profile_id}")
+        return None
 
 
 def sync_profiles(profile_a_id: str, profile_b_id: str) -> bool:
@@ -249,6 +353,48 @@ def sync_profiles(profile_a_id: str, profile_b_id: str) -> bool:
     except Exception:
         logger.exception(f"Failed to sync profiles {profile_a_id} <-> {profile_b_id}")
         return False
+
+
+def migrate_mybot_owner(old_id: str, new_id: str) -> None:
+    """Move MYBOT ownership tables from old_id to new_id when linking accounts."""
+    sb = get_client()
+
+    try:
+        existing = sb.table("mybot_settings").select("user_id").eq("user_id", new_id).execute()
+        if not existing.data:
+            sb.table("mybot_settings").update({"user_id": new_id}).eq("user_id", old_id).execute()
+        else:
+            logger.warning(f"MYBOT settings already exist for {new_id}; skipping migrate")
+    except Exception:
+        logger.exception("Failed to migrate mybot_settings")
+
+    try:
+        sb.table("mybot_settings_history").update({"user_id": new_id}).eq("user_id", old_id).execute()
+    except Exception:
+        logger.exception("Failed to migrate mybot_settings_history")
+
+    try:
+        existing = sb.table("mybot_line_channels").select("user_id").eq("user_id", new_id).execute()
+        if not existing.data:
+            sb.table("mybot_line_channels").update({"user_id": new_id}).eq("user_id", old_id).execute()
+    except Exception:
+        logger.exception("Failed to migrate mybot_line_channels")
+
+    try:
+        sb.table("mybot_predictions").update({"bot_user_id": new_id}).eq("bot_user_id", old_id).execute()
+    except Exception:
+        logger.exception("Failed to migrate mybot_predictions")
+
+    try:
+        sb.table("mybot_stats").update({"bot_user_id": new_id}).eq("bot_user_id", old_id).execute()
+    except Exception:
+        logger.exception("Failed to migrate mybot_stats")
+
+    try:
+        sb.table("mybot_follows").update({"user_id": new_id}).eq("user_id", old_id).execute()
+        sb.table("mybot_follows").update({"bot_user_id": new_id}).eq("bot_user_id", old_id).execute()
+    except Exception:
+        logger.exception("Failed to migrate mybot_follows")
 
 
 # Keep merge_profiles as alias for backward compatibility
