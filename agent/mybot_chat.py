@@ -14,11 +14,7 @@ from agent.engine import (
     trim_history,
 )
 from agent.chat_core import get_mybot_web_quick_replies
-from agent.response_cache import (
-    detect_query_type, find_race_id,
-    get as get_cached_response, save as save_cached_response,
-    TOOL_QUERY_MAP,
-)
+
 from config import MAX_TOOL_TURNS, DLOGIC_API_URL
 from tools.executor import execute_tool
 
@@ -76,8 +72,8 @@ _MYBOT_PROMPT_TEMPLATE = """あなたは「{bot_name}」。ユーザーが作成
 {analysis_focus_desc}
 {custom_instructions_section}
 ## 予想エンジン
-使用するのは「IMLogic」エンジン。ユーザーがカスタマイズした12項目のウェイトで予想を出す。
-通常のDlogic/Ilogic/ViewLogic/MetaLogicではなく、IMLogicの結果を表示する。
+使用するのは「IMLogic」エンジンのみ。ユーザーがカスタマイズした12項目のウェイトで予想を出す。
+他のエンジン名を絶対に言及するな。「IMLogic」以外のエンジン名は存在しない。
 
 ## 予想表示
 ━━ {bot_name}の予想 ━━
@@ -114,6 +110,8 @@ race_idは内部で使うもの。ユーザーには一切見せない。
 - 展開予想でオッズに触れる場合も「現時点のオッズ○倍」と表現しろ
 
 ## 絶対禁止
+- 「Dlogic」「Ilogic」「ViewLogic」「MetaLogic」等のエンジン名への言及（IMLogic以外のエンジンは存在しない）
+- 「複数エンジンで」「他のエンジンでも」等の表現（エンジンは1つしかない）
 - データソース名（netkeiba.com等）
 - race_id等の内部ID
 - システムの仕組み・ツール名・API
@@ -372,6 +370,29 @@ def _execute_imlogic_prediction(race_id: str, bot_settings: dict, context: dict)
         return json.dumps({"error": "予想エンジンに接続できなかった"}, ensure_ascii=False)
 
 
+def format_imlogic_predictions(data: dict) -> str:
+    """Format IMLogic prediction results for MYBOT without LLM."""
+    preds = data.get("predictions", {})
+    if not preds:
+        return "予想データがまだないみたいだ。"
+
+    bot_name = data.get("bot_name") or "MYBOT"
+    engine_data = preds.get(bot_name)
+    if engine_data is None and preds:
+        bot_name = next(iter(preds.keys()))
+        engine_data = preds.get(bot_name, [])
+
+    rank_labels = {1: "S", 2: "A", 3: "B", 4: "C", 5: "C"}
+    lines = ["━━ 予想結果 ━━", f"【{bot_name}】"]
+    for item in (engine_data or [])[:5]:
+        num = item.get("horse_number", "?")
+        name = item.get("horse_name", "?")
+        rl = item.get("rank_label") or rank_labels.get(item.get("rank", 0), "C")
+        lines.append(f"{rl} {num}.{name}")
+
+    return "\n".join(lines).strip()
+
+
 def _preformat_tool_result(tool_name: str, raw_result: str, race_id: str | None = None) -> str:
     """Format tool results using the same templates as Dlogic."""
     try:
@@ -446,33 +467,43 @@ def run_mybot_agent(
     system = _build_mybot_system_prompt(bot_settings, user_context)
     history = trim_history(history)
 
-    # ── Pre-loop cache check (shared with Dlogic) ──
-    query_type = detect_query_type(user_message)
-    if query_type:
-        race_id = find_race_id(history) or active_race_id_hint
-        if race_id:
-            cached = get_cached_response(race_id, query_type)
-            if cached:
-                logger.info(f"MYBOT pre-loop cache hit: {race_id}:{query_type}")
-                history.append({"role": "user", "content": user_message})
-                history.append({"role": "assistant", "content": cached["text"]})
+    # ── Template router: bypass Claude for deterministic queries ──
+    # MYBOT uses same templates as Dlogic except for predictions (IMLogic only)
+    from agent.template_router import match_route, route_and_respond
+    _MYBOT_SKIP_ROUTES = {"predictions"}  # predictions must go through IMLogic intercept
 
-                full_text = cached["text"]
-                footer = _format_mybot_footer(cached["tools_used"], bot_settings)
+    route = match_route(user_message)
+    if route:
+        route_name, route_params = route
+        if route_name not in _MYBOT_SKIP_ROUTES:
+            logger.info(f"MYBOT template route matched: {route_name}")
+            history.append({"role": "user", "content": user_message})
+
+            result = route_and_respond(route_name, route_params, None, history, profile,
+                                       active_race_id_hint=active_race_id_hint)
+            if result:
+                logger.info(f"MYBOT template route handled: {route_name} (Claude API skipped)")
+                for entry in result.get("history_entries", []):
+                    history.append(entry)
+
+                full_text = result["text"]
+                footer = _format_mybot_footer(result["tools_used"], bot_settings)
                 if footer:
                     full_text += "\n\n" + footer
 
                 yield {
                     "type": "done",
                     "text": full_text,
-                    "raw_text": cached["text"],
+                    "raw_text": result["text"],
                     "footer": footer,
-                    "tools_used": cached["tools_used"],
-                    "active_race_id": race_id,
+                    "tools_used": result["tools_used"],
+                    "active_race_id": result.get("active_race_id"),
                     "history": history,
-                    "quick_replies": get_mybot_web_quick_replies(cached["tools_used"]),
+                    "quick_replies": get_mybot_web_quick_replies(result["tools_used"]),
                 }
                 return
+            else:
+                history.pop()  # Route matched but couldn't handle
 
     # Agentic loop
     history.append({"role": "user", "content": user_message})
@@ -481,7 +512,6 @@ def run_mybot_agent(
     tools_used = []
     response = None
     active_race_id = active_race_id_hint
-    cache_used = False
     tool_context = {"user_profile_id": profile_id}
     # Tools whose results are pre-formatted and should bypass Claude's text
     _PREFORMAT_TOOLS = {"get_odds_probability", "get_horse_weights"}
@@ -499,25 +529,12 @@ def run_mybot_agent(
             history.append({"role": "assistant", "content": response.content})
             break
 
-        # ── Mid-loop cache check ──
-        mid_cache = None
+        # Track active race_id from tool inputs
         for tb in tool_blocks:
             inp = tb.input if isinstance(tb.input, dict) else {}
             rid = inp.get("race_id")
             if rid:
                 active_race_id = rid
-            qt = TOOL_QUERY_MAP.get(tb.name)
-            if rid and qt:
-                mid_cache = get_cached_response(rid, qt)
-                if mid_cache:
-                    break
-
-        if mid_cache:
-            logger.info(f"MYBOT mid-loop cache hit: {active_race_id}")
-            history.append({"role": "assistant", "content": mid_cache["text"]})
-            tools_used = mid_cache["tools_used"]
-            cache_used = True
-            break
 
         history.append({"role": "assistant", "content": response.content})
 
@@ -562,10 +579,7 @@ def run_mybot_agent(
         history.append({"role": "user", "content": tool_results})
 
     # Build final response
-    if cache_used:
-        response_text = mid_cache["text"]
-        footer = _format_mybot_footer(mid_cache["tools_used"], bot_settings)
-    elif last_preformatted_text:
+    if last_preformatted_text:
         # Use pre-formatted text directly, bypassing Claude's formatting
         response_text = last_preformatted_text
         footer = _format_mybot_footer(tools_used, bot_settings)
@@ -580,11 +594,8 @@ def run_mybot_agent(
 
     full_text = response_text + ("\n\n" + footer if footer else "")
 
-    # ── Post-loop: save to response cache ──
-    if not cache_used and active_race_id:
-        save_qt = detect_query_type(user_message)
-        if save_qt:
-            save_cached_response(active_race_id, save_qt, response_text, footer, tools_used)
+    # NOTE: MYBOT does NOT save to the shared response cache.
+    # Each MYBOT has different IMLogic weights, so caching would mix results.
 
     yield {
         "type": "done",

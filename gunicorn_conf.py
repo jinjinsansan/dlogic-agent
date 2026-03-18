@@ -4,18 +4,17 @@ gevent workers: each worker handles 100+ concurrent connections via green thread
 With 4 workers on a 4-core VPS, this handles 400+ simultaneous LINE webhook requests.
 """
 
+import os
 import multiprocessing
 
 # Server socket
 bind = "0.0.0.0:5000"
 
 # Worker processes
-# Use 1 gevent worker: all work is I/O-bound (Claude API, Supabase, HTTP)
-# so gevent handles 1000+ concurrent connections in a single process.
-# Multiple workers would split in-memory conversation history across processes.
-workers = 1
+# Default to 1 worker; can scale when Redis is enabled for shared sessions.
+workers = int(os.getenv("GUNICORN_WORKERS", "1"))
 worker_class = "gevent"
-worker_connections = 1000  # max concurrent connections per worker
+worker_connections = int(os.getenv("GUNICORN_WORKER_CONNECTIONS", "1000"))
 
 # Timeouts
 timeout = 120  # Claude API can take up to 60s for complex queries

@@ -26,10 +26,12 @@ import requests as http_requests
 from flask import Blueprint, request, jsonify, Response
 
 from api.auth import verify_auth_header
+from agent.chat_core import get_mybot_web_quick_replies
 from db.encryption import encrypt_value, decrypt_value
 from db.supabase_client import get_client
 from db.redis_client import get_redis
 from db.user_manager import get_user_status
+from api.web_chat import load_session, save_session
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,85 @@ _RATE_LIMITS = {
     "upload": (3, 60),      # 3 per 60s
     "inquiry": (3, 300),    # 3 per 5 minutes
 }
+
+_QUERY_ROUTE_MAP = {
+    "prediction": ("predictions", {}),
+    "predictions": ("predictions", {}),
+    "odds": ("odds", {}),
+    "weights": ("weights", {}),
+    "odds_probability": ("odds_probability", {}),
+    "stable_comments": ("stable_comments", {}),
+    "training": ("training", {}),
+    "race_results": ("race_results", {}),
+    "my_stats": ("my_stats", {}),
+    "honmei_ratio": ("honmei_ratio", {}),
+    "today_races_jra": ("today_races", {"race_type": "jra"}),
+    "today_races_nar": ("today_races", {"race_type": "nar"}),
+}
+
+
+def _route_from_query_type(query_type: str) -> tuple[str, dict] | None:
+    if not query_type:
+        return None
+    return _QUERY_ROUTE_MAP.get(query_type.strip().lower())
+
+# Honmei (本命) blocking keywords (same as LINE)
+_RACE_CHANGE_KEYWORDS = [
+    "他のレース", "別のレース", "次のレース",
+    "船橋", "大井", "川崎", "浦和", "園田", "姫路", "金沢", "名古屋", "笠松", "高知", "佐賀",
+    "中山", "阪神", "東京", "京都", "小倉", "新潟", "福島", "札幌", "函館",
+    "今日のJRA", "今日の地方", "地方競馬", "JRA", "メインレース",
+]
+
+_SAME_RACE_KEYWORDS = [
+    "予想して", "オッズ", "馬体重", "関係者", "展開", "騎手", "血統", "過去", "直近",
+    "どう思う", "全部", "掘り下げ",
+]
+
+
+def _is_same_race_query(text: str) -> bool:
+    return any(kw in text for kw in _SAME_RACE_KEYWORDS)
+
+
+def _build_honmei_quick_replies(race_id: str) -> list[dict]:
+    from tools.executor import _race_cache, execute_tool
+
+    if race_id not in _race_cache or "entries" not in _race_cache[race_id]:
+        try:
+            execute_tool("get_race_entries", {"race_id": race_id})
+        except Exception:
+            logger.exception(f"Failed to populate entries for honmei: {race_id}")
+
+    entries = _race_cache.get(race_id, {}).get("entries", {})
+    horses = entries.get("horses", [])
+    horse_numbers = entries.get("horse_numbers", [])
+    if not horses or not horse_numbers:
+        return []
+
+    items = []
+    for i in range(min(len(horses), len(horse_numbers), 18)):
+        num = horse_numbers[i]
+        name = horses[i]
+        items.append({
+            "label": f"{num}.{name}"[:20],
+            "text": f"本命 {num}番 {name}",
+        })
+    return items
+
+
+def _has_pending_honmei(session: dict, profile_id: str) -> bool:
+    race_id = session.get("pending_honmei_race")
+    if not race_id:
+        return False
+    try:
+        from db.prediction_manager import check_prediction
+        existing = check_prediction(profile_id, race_id)
+    except Exception:
+        return False
+    if existing:
+        session.pop("pending_honmei_race", None)
+        return False
+    return True
 
 
 def _check_rate_limit(user_id: str, action: str) -> bool:
@@ -221,6 +302,20 @@ def save_settings():
             "snapshot": snapshot,
             "label": data.get("history_label"),
         }).execute()
+
+        # Clear conversation history if personality/tone changed
+        _BEHAVIOR_KEYS = ("personality", "tone", "prediction_style", "custom_instructions")
+        behavior_changed = any(old.get(k) != row.get(k) for k in _BEHAVIOR_KEYS)
+        if behavior_changed:
+            try:
+                import redis
+                r = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379"))
+                keys = r.keys(f"mybot:history:{user_id}:*")
+                if keys:
+                    r.delete(*keys)
+                    logger.info(f"Cleared {len(keys)} MYBOT sessions for {user_id} (behavior changed)")
+            except Exception:
+                pass  # Redis unavailable — sessions will expire naturally
 
         # Update
         result = sb.table("mybot_settings").update(row).eq("user_id", user_id).execute()
@@ -718,7 +813,10 @@ def follow_bot():
 
     sb = get_client()
 
-    # Official Dlogic bot — skip mybot_settings check
+    # Official Dlogic bot — skip follow (not in user_profiles, FK would fail)
+    if bot_user_id == DLOGIC_OFFICIAL_BOT_ID:
+        return jsonify({"status": "followed"})
+
     if bot_user_id != DLOGIC_OFFICIAL_BOT_ID:
         # Verify bot exists and is public
         bot_check = (
@@ -918,11 +1016,14 @@ def _send_web_inquiry(bot_user_id: str, bot_name: str, sender_name: str, sender_
     return inquiry_id
 
 
-def _sse_text_response(text: str, session_id: str = ""):
+def _sse_text_response(text: str, session_id: str = "", quick_replies: list[dict] | None = None):
     """Return SSE response with a simple text message (no agent loop)."""
+    if quick_replies is None:
+        quick_replies = []
+
     def generate():
         yield f"data: {json.dumps({'type': 'text', 'content': text}, ensure_ascii=False)}\n\n"
-        yield f"data: {json.dumps({'type': 'done', 'session_id': session_id}, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'session_id': session_id, 'quick_replies': quick_replies}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 
     return Response(
@@ -951,6 +1052,7 @@ def mybot_chat():
         return jsonify({"error": "Invalid JSON"}), 400
 
     message = data.get("message", "").strip()
+    query_type = (data.get("query_type") or "").strip()
     if not message:
         return jsonify({"error": "Empty message"}), 400
 
@@ -1009,6 +1111,29 @@ def mybot_chat():
     user_lid = payload["lid"] if payload else f"anon_{session_id}"
     user_name = payload.get("name", "Webユーザー") if payload else "匿名ユーザー"
     bot_name = bot_settings.get("bot_name", "MYBOT")
+    auth_key = f"mybot_{user_lid}_{bot_user_id}"
+
+    def _get_or_create_session():
+        session = load_session(auth_key)
+        if session:
+            session["last_active"] = datetime.now(timezone.utc).timestamp()
+            return session
+
+        if payload:
+            from db.user_manager import get_or_create_user_by_login
+            profile = get_or_create_user_by_login(payload["lid"], payload["name"])
+        else:
+            profile = {"id": f"anon_{session_id}", "display_name": "匿名ユーザー"}
+
+        session = {
+            "profile": profile,
+            "history": [],
+            "active_race_id": None,
+            "created_at": datetime.now(timezone.utc).timestamp(),
+            "last_active": datetime.now(timezone.utc).timestamp(),
+        }
+        save_session(auth_key, session)
+        return session
 
     # --- Inquiry mode handling ---
     if _is_web_inquiry_mode(user_lid, bot_user_id):
@@ -1064,15 +1189,15 @@ def mybot_chat():
 
         if synced:
             # Refresh session profile to pick up synced fields
-            auth_key = f"mybot_{user_lid}_{bot_user_id}"
-            from api.web_chat import _sessions
-            if auth_key in _sessions:
-                try:
-                    refreshed = sb.table("user_profiles").select("*").eq("id", current_profile["id"]).limit(1).execute()
-                    if refreshed.data:
-                        _sessions[auth_key]["profile"] = refreshed.data[0]
-                except Exception:
-                    pass
+            try:
+                refreshed = sb.table("user_profiles").select("*").eq("id", current_profile["id"]).limit(1).execute()
+                if refreshed.data:
+                    session = load_session(auth_key)
+                    if session:
+                        session["profile"] = refreshed.data[0]
+                        save_session(auth_key, session)
+            except Exception:
+                pass
             return _sse_text_response("🎉 アカウント連携完了！データが統合されました。", session_id)
         else:
             return _sse_text_response("連携でエラーが発生しました。もう一度試してください。", session_id)
@@ -1089,11 +1214,10 @@ def mybot_chat():
 
             profile = _get_user(payload["lid"], payload["name"])
             # Find race_id from session
-            from api.web_chat import _sessions
-            auth_key = f"mybot_{user_lid}_{bot_user_id}"
             race_id = None
-            if auth_key in _sessions:
-                race_id = _sessions[auth_key].get("pending_honmei_race") or _sessions[auth_key].get("active_race_id")
+            session = load_session(auth_key)
+            if session:
+                race_id = session.get("pending_honmei_race") or session.get("active_race_id")
 
             if race_id and not profile.get("fallback"):
                 venue = ""
@@ -1109,8 +1233,10 @@ def mybot_chat():
                         race_name="",
                         venue=venue,
                     )
-                    if auth_key in _sessions:
-                        _sessions[auth_key].pop("pending_honmei_race", None)
+                    session = load_session(auth_key)
+                    if session:
+                        session.pop("pending_honmei_race", None)
+                        save_session(auth_key, session)
                     return _sse_text_response(
                         f"👊 {horse_number}番 {horse_name} を本命で登録したぜ！\n\n"
                         "みんなの予想に追加したからな。結果出たら回収率も計算してやるよ。",
@@ -1122,34 +1248,96 @@ def mybot_chat():
             else:
                 return _sse_text_response("レースを先に見てから本命を選んでくれ！", session_id)
 
+    # --- Honmei blocking: pending pick ---
+    session = load_session(auth_key)
+    if session:
+        profile_id = session.get("profile", {}).get("id", "")
+        if profile_id and not profile_id.startswith("anon_"):
+            if _has_pending_honmei(session, profile_id) and not _is_same_race_query(message):
+                pending_race = session.get("pending_honmei_race") or session.get("active_race_id")
+                honmei_items = _build_honmei_quick_replies(pending_race) if pending_race else []
+                if honmei_items:
+                    save_session(auth_key, session)
+                    return _sse_text_response(
+                        "おっと、ちょっと待ってくれ！\n\n"
+                        "「みんなの予想」を集計してるんだ。\n"
+                        "本命を登録してくれたら次に進めるぜ！\n\n"
+                        "👇 下のボタンから本命をタップ！",
+                        session_id,
+                        honmei_items,
+                    )
+
+    # --- Fast path: query_type provided (skip LLM where possible) ---
+    route = _route_from_query_type(query_type)
+    if route:
+        from agent.template_router import route_and_respond, _build_history_entries
+        from agent.mybot_chat import _execute_imlogic_prediction, format_imlogic_predictions, _format_mybot_footer
+        from agent.response_cache import find_race_id
+        from agent.engine import trim_history
+
+        session = _get_or_create_session()
+        history = trim_history(session["history"])
+        profile = session["profile"]
+
+        route_name, route_params = route
+        if route_name == "predictions":
+            race_id = find_race_id(history) or session.get("active_race_id")
+            if race_id:
+                result_str = _execute_imlogic_prediction(race_id, bot_settings, context={"user_profile_id": profile.get("id", "")})
+                data = json.loads(result_str)
+                text = format_imlogic_predictions(data)
+                tools_used = ["get_predictions"]
+                footer = _format_mybot_footer(tools_used, bot_settings)
+                full_text = text + ("\n\n" + footer if footer else "")
+
+                history.append({"role": "user", "content": message})
+                history.extend(_build_history_entries(
+                    tool_name="get_predictions",
+                    tool_input={"race_id": race_id},
+                    tool_result=result_str,
+                    final_text=text,
+                ))
+                session["history"] = history
+                session["active_race_id"] = race_id
+                save_session(auth_key, session)
+                return _sse_text_response(full_text, session_id,
+                                          quick_replies=get_mybot_web_quick_replies(tools_used))
+        else:
+            history.append({"role": "user", "content": message})
+            result = route_and_respond(
+                route_name,
+                route_params,
+                profile.get("id", ""),
+                history,
+                profile,
+                active_race_id_hint=session.get("active_race_id"),
+            )
+            if result:
+                for entry in result.get("history_entries", []):
+                    history.append(entry)
+
+                full_text = result["text"]
+                footer = _format_mybot_footer(result["tools_used"], bot_settings)
+                if footer:
+                    full_text += "\n\n" + footer
+
+                if result.get("active_race_id"):
+                    session["active_race_id"] = result["active_race_id"]
+                session["history"] = history
+                save_session(auth_key, session)
+                return _sse_text_response(full_text, session_id,
+                                          quick_replies=get_mybot_web_quick_replies(result["tools_used"]))
+            else:
+                history.pop()
+
     from agent.engine import TOOL_LABELS, trim_history
     from agent.mybot_chat import run_mybot_agent
 
     # Session management (similar to web_chat)
-    from api.web_chat import _sessions, _cleanup_old_sessions, _SESSION_MAX_AGE
+    from api.web_chat import _cleanup_old_sessions
 
-    if len(_sessions) > 100:
-        _cleanup_old_sessions()
-
-    auth_key = f"mybot_{user_lid}_{bot_user_id}"
-    if auth_key in _sessions:
-        session = _sessions[auth_key]
-        session["last_active"] = datetime.now(timezone.utc).timestamp()
-    else:
-        if payload:
-            from db.user_manager import get_or_create_user_by_login
-            profile = get_or_create_user_by_login(payload["lid"], payload["name"])
-        else:
-            # Anonymous profile
-            profile = {"id": f"anon_{session_id}", "display_name": "匿名ユーザー"}
-        session = {
-            "profile": profile,
-            "history": [],
-            "active_race_id": None,
-            "created_at": datetime.now(timezone.utc).timestamp(),
-            "last_active": datetime.now(timezone.utc).timestamp(),
-        }
-        _sessions[auth_key] = session
+    _cleanup_old_sessions()
+    session = _get_or_create_session()
 
     history = trim_history(session["history"])
     session["history"] = history
@@ -1223,6 +1411,7 @@ def mybot_chat():
                                             )
                                             quick_replies = honmei_items
 
+                    save_session(auth_key, session)
                     yield f"data: {json.dumps({'type': 'text', 'content': full_text}, ensure_ascii=False)}\n\n"
                     done_data = {
                         "type": "done",
