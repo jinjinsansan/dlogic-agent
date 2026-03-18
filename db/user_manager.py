@@ -493,6 +493,37 @@ def set_maintenance(enabled: bool, message: str = None) -> None:
     set_bot_config("maintenance", config)
 
 
+def _sync_paired_profile_status(sb, profile_id: str, status: str) -> None:
+    """Sync status to the paired login_ profile (or vice versa).
+
+    LINE Bot uses line_user_id = 'Uxxxx', MYBOT uses 'login_Uxxxx'.
+    When one is activated, the other must be too.
+    """
+    try:
+        res = sb.table("user_profiles") \
+            .select("line_user_id") \
+            .eq("id", profile_id) \
+            .limit(1) \
+            .execute()
+        if not res.data:
+            return
+        uid = res.data[0].get("line_user_id", "")
+        if not uid:
+            return
+        # Determine the paired line_user_id
+        if uid.startswith("login_"):
+            paired_uid = uid[len("login_"):]
+        else:
+            paired_uid = f"login_{uid}"
+        # Update paired profile
+        sb.table("user_profiles") \
+            .update({"status": status}) \
+            .eq("line_user_id", paired_uid) \
+            .execute()
+    except Exception as e:
+        logger.warning(f"Failed to sync paired profile for {profile_id}: {e}")
+
+
 def get_user_status(profile_id: str) -> str:
     """Get user's status (active/waitlist/suspended)."""
     sb = get_client()
@@ -507,30 +538,45 @@ def get_user_status(profile_id: str) -> str:
 
 
 def set_user_status(profile_id: str, status: str) -> None:
-    """Set user's status."""
+    """Set user's status. Also updates the paired login_ profile if exists."""
     sb = get_client()
     sb.table("user_profiles") \
         .update({"status": status}) \
         .eq("id", profile_id) \
         .execute()
+    # Also update paired login_ profile (MYBOT uses this)
+    _sync_paired_profile_status(sb, profile_id, status)
 
 
 def activate_users(count: int) -> list[dict]:
-    """Activate `count` waitlisted users (oldest first). Returns activated profiles."""
+    """Activate `count` waitlisted users (oldest first). Returns activated profiles.
+
+    Only counts real users (excludes login_ profiles from the count).
+    Paired login_ profiles are activated automatically via sync.
+    """
     sb = get_client()
+    # Fetch more than needed to filter out login_ profiles
     res = sb.table("user_profiles") \
         .select("id, display_name, line_user_id") \
         .eq("status", "waitlist") \
         .order("first_seen_at", desc=False) \
-        .limit(count) \
+        .limit(count * 2) \
         .execute()
 
     activated = []
     for profile in res.data:
+        if len(activated) >= count:
+            break
+        # Skip login_ profiles — they'll be activated via sync
+        uid = profile.get("line_user_id", "")
+        if uid.startswith("login_"):
+            continue
         sb.table("user_profiles") \
             .update({"status": "active"}) \
             .eq("id", profile["id"]) \
             .execute()
+        # Also activate paired login_ profile (MYBOT uses this)
+        _sync_paired_profile_status(sb, profile["id"], "active")
         activated.append(profile)
     return activated
 

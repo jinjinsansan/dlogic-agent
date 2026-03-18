@@ -1304,7 +1304,7 @@ def line_connect():
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
         },
-        json={"endpoint": webhook_url},
+        json={"endpoint": webhook_url, "active": True},
     )
     if webhook_resp.status_code != 200:
         logger.warning(f"LINE webhook set failed for user {user_id}: {webhook_resp.text}")
@@ -1344,11 +1344,25 @@ def line_connect():
     except Exception:
         logger.exception(f"MYBOT rich menu setup error for user {user_id}")
 
+    # Check webhook active status
+    webhook_active = True
+    try:
+        wr = http_requests.get(
+            "https://api.line.me/v2/bot/channel/webhook/endpoint",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=5,
+        )
+        if wr.status_code == 200:
+            webhook_active = wr.json().get("active", True)
+    except Exception:
+        pass
+
     return jsonify({
         "status": "connected",
         "bot_name": bot_info.get("displayName"),
         "bot_picture_url": bot_info.get("pictureUrl"),
         "webhook_url": webhook_url,
+        "webhook_active": webhook_active,
     })
 
 
@@ -1392,10 +1406,32 @@ def line_status():
     cid = ch["channel_id"]
     masked_id = f"{cid[:4]}{'*' * max(len(cid) - 6, 0)}{cid[-2:]}" if len(cid) > 6 else cid
 
+    # Check webhook active status from LINE API
+    webhook_active = True  # default optimistic
+    try:
+        from bot.mybot_line_handler import decrypt_value
+        access_token_enc = (
+            sb.table("mybot_line_channels")
+            .select("access_token_enc")
+            .eq("user_id", user_id)
+            .execute()
+        ).data[0]["access_token_enc"]
+        token = decrypt_value(access_token_enc)
+        wr = http_requests.get(
+            "https://api.line.me/v2/bot/channel/webhook/endpoint",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=5,
+        )
+        if wr.status_code == 200:
+            webhook_active = wr.json().get("active", True)
+    except Exception:
+        pass  # fail-open
+
     return jsonify({
         "connected": True,
         "channel_id": masked_id,
         "webhook_url": ch["webhook_url"],
+        "webhook_active": webhook_active,
         "bot_name": ch.get("bot_name"),
         "bot_picture_url": ch.get("bot_picture_url"),
         "connected_at": ch["connected_at"],
