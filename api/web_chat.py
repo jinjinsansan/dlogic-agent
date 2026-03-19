@@ -532,7 +532,6 @@ def chat():
             if result.get("active_race_id"):
                 session["active_race_id"] = result["active_race_id"]
             session["history"] = history
-            save_session(session_key, session)
 
             # Save to response cache for non-query_type callers
             save_qt = detect_query_type(message)
@@ -541,6 +540,28 @@ def chat():
                                      result["text"], result.get("footer", ""), result["tools_used"])
 
             quick_replies = get_web_quick_replies(result["tools_used"])
+
+            # Honmei prompt on fast path (predictions)
+            if auth_payload and result.get("active_race_id") and "get_predictions" in result["tools_used"]:
+                pid = profile.get("id", "")
+                if pid and not pid.startswith("anon_"):
+                    try:
+                        already_picked = db_check_prediction(pid, result["active_race_id"])
+                    except Exception:
+                        already_picked = True
+                    if not already_picked and _should_prompt_honmei(result["active_race_id"]):
+                        session["pending_honmei_race"] = result["active_race_id"]
+                        honmei_qr = _build_honmei_quick_replies(result["active_race_id"])
+                        if honmei_qr:
+                            full_text += (
+                                "\n\n━━━━━━━━\n"
+                                "📢 みんなの予想\n"
+                                "━━━━━━━━\n\n"
+                                "お前の本命を教えてくれ！👇"
+                            )
+                            quick_replies = honmei_qr
+
+            save_session(session_key, session)
             return _sse_text_response(full_text, session_id, quick_replies)
         else:
             history.pop()
