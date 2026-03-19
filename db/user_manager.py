@@ -60,7 +60,7 @@ def get_link_code_login_id(code: str) -> str | None:
         return None
     if _redis:
         val = _redis.get(_link_code_key(code))
-        return val.decode("utf-8") if val else None
+        return val if val else None
     entry = _link_code_cache.get(code)
     if not entry:
         return None
@@ -90,7 +90,7 @@ def consume_link_code(code: str) -> str | None:
         val = _redis.get(key)
         if val:
             _redis.delete(key)
-            return val.decode("utf-8")
+            return val
         return None
     line_login_id = get_link_code_login_id(code)
     _link_code_cache.pop(code, None)
@@ -727,12 +727,46 @@ def activate_users(count: int) -> list[dict]:
     return activated
 
 
+def activate_mybot_users(count: int) -> list[dict]:
+    """Activate `count` waitlisted MYBOT users (login_ profiles only)."""
+    sb = get_client()
+    res = sb.table("user_profiles") \
+        .select("id, display_name, line_user_id") \
+        .eq("status", "waitlist") \
+        .like("line_user_id", "login_%") \
+        .order("first_seen_at", desc=False) \
+        .limit(count) \
+        .execute()
+
+    activated = []
+    for profile in res.data:
+        if len(activated) >= count:
+            break
+        sb.table("user_profiles") \
+            .update({"status": "active"}) \
+            .eq("id", profile["id"]) \
+            .execute()
+        activated.append(profile)
+    return activated
+
+
 def get_waitlist_count() -> int:
     """Get number of users in waitlist."""
     sb = get_client()
     res = sb.table("user_profiles") \
         .select("id", count="exact") \
         .eq("status", "waitlist") \
+        .execute()
+    return res.count or 0
+
+
+def get_mybot_waitlist_count() -> int:
+    """Get number of MYBOT waitlisted users (login_ profiles only)."""
+    sb = get_client()
+    res = sb.table("user_profiles") \
+        .select("id", count="exact") \
+        .eq("status", "waitlist") \
+        .like("line_user_id", "login_%") \
         .execute()
     return res.count or 0
 

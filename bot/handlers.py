@@ -34,7 +34,8 @@ from config import TELEGRAM_BOT_TOKEN, MAX_TOOL_TURNS, ONBOARDING_TEXT, ADMIN_TE
 from tools.executor import execute_tool
 from db.user_manager import (
     is_maintenance_mode, set_maintenance, get_maintenance_message,
-    activate_users, get_waitlist_count, get_active_count, get_total_user_count,
+    activate_users, activate_mybot_users,
+    get_waitlist_count, get_mybot_waitlist_count, get_active_count, get_total_user_count,
 )
 from db.supabase_client import get_client as get_supabase
 
@@ -533,7 +534,9 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         f"/maintenance_on [msg] - メンテON\n"
         f"/maintenance_off - メンテOFF\n"
         f"/activate [数] - ウェイトリスト解除\n"
-        f"/activate_all - 全員アクティベート"
+        f"/activate_mybot [数] - MYBOT待機解除\n"
+        f"/activate_all - 全員アクティベート\n"
+        f"/broadcast [line|all|mybot] メッセージ - 全ユーザーに送信"
     )
 
 
@@ -589,6 +592,34 @@ async def activate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         except Exception:
             logger.exception(f"Failed to notify activated user: {user['display_name']}")
     await update.message.reply_text(f"📨 LINE通知: {notified}/{len(activated)}人に送信")
+
+
+async def activate_mybot_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Activate N MYBOT users from waitlist. Usage: /activate_mybot 10"""
+    if not _is_admin(update):
+        await update.message.reply_text("⛔ 管理者のみ使用可能です。")
+        return
+
+    count = 10
+    if context.args:
+        try:
+            count = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("数値を指定してください: /activate_mybot 10")
+            return
+
+    activated = activate_mybot_users(count)
+    if not activated:
+        await update.message.reply_text("MYBOTウェイトリストに待機ユーザーがいません。")
+        return
+
+    names = "\n".join([f"  • {u['display_name']}" for u in activated])
+    remaining = get_mybot_waitlist_count()
+    await update.message.reply_text(
+        f"✅ MYBOT {len(activated)}人をアクティベートしました！\n\n"
+        f"{names}\n\n"
+        f"残りMYBOTウェイトリスト: {remaining}人"
+    )
 
 
 async def inquiries_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -868,6 +899,154 @@ async def activate_all_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 # ---------------------------------------------------------------------------
+# Broadcast command
+# ---------------------------------------------------------------------------
+
+async def _broadcast_impl(update: Update, target: str, message: str) -> None:
+    """Shared broadcast implementation for line/all/mybot targets."""
+    sb = get_supabase()
+
+    line_users = []
+    mybot_users = []
+
+    if target in ("line", "all"):
+        res = sb.table("user_profiles") \
+            .select("line_user_id") \
+            .eq("status", "active") \
+            .not_.like("line_user_id", "login_%") \
+            .execute()
+        line_users = [r["line_user_id"] for r in res.data if r.get("line_user_id")]
+
+    if target in ("mybot", "all"):
+        from db.encryption import decrypt_value
+        res = sb.table("mybot_line_channels") \
+            .select("access_token_enc, user_id") \
+            .not_.is_("access_token_enc", "null") \
+            .execute()
+        for ch in res.data:
+            token_enc = ch.get("access_token_enc")
+            if not token_enc:
+                continue
+            try:
+                access_token = decrypt_value(token_enc)
+            except Exception:
+                continue
+            # Get bot_name from mybot_settings
+            bot_name = ""
+            try:
+                s = sb.table("mybot_settings") \
+                    .select("bot_name") \
+                    .eq("user_id", ch["user_id"]) \
+                    .limit(1) \
+                    .execute()
+                if s.data:
+                    bot_name = s.data[0].get("bot_name", "")
+            except Exception:
+                pass
+            mybot_users.append({
+                "access_token": access_token,
+                "bot_name": bot_name,
+            })
+
+    await update.message.reply_text(
+        f"📢 ブロードキャスト送信中...\n"
+        f"対象: {target}\n"
+        f"Dロジくん: {len(line_users)}人\n"
+        f"MYBOT: {len(mybot_users)}人"
+    )
+
+    import time as _time
+
+    success_line = 0
+    if line_users:
+        from bot.line_handlers import _push
+        broadcast_text = (
+            "📢 運営からのお知らせだぜ！\n\n"
+            f"{message}\n\n"
+            "━━━━━━━━━━━━"
+        )
+        for uid in line_users:
+            try:
+                _push(uid, broadcast_text)
+                success_line += 1
+                _time.sleep(0.1)
+            except Exception:
+                logger.warning(f"Broadcast push failed: {uid[:10]}...")
+
+    success_mybot = 0
+    if mybot_users:
+        import requests as _requests
+        broadcast_text = (
+            "📢 Dlogic運営からのお知らせです！\n\n"
+            f"{message}\n\n"
+            "━━━━━━━━━━━━"
+        )
+        for entry in mybot_users:
+            try:
+                resp = _requests.post(
+                    "https://api.line.me/v2/bot/message/broadcast",
+                    headers={
+                        "Authorization": f"Bearer {entry['access_token']}",
+                        "Content-Type": "application/json",
+                    },
+                    json={"messages": [{"type": "text", "text": broadcast_text}]},
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    success_mybot += 1
+                    logger.info(f"MYBOT broadcast sent: {entry['bot_name']}")
+                else:
+                    logger.warning(f"MYBOT broadcast failed ({entry['bot_name']}): {resp.status_code}")
+                _time.sleep(0.3)
+            except Exception:
+                logger.warning(f"MYBOT broadcast error: {entry['bot_name']}")
+
+    result_lines = ["✅ ブロードキャスト完了！"]
+    if line_users:
+        result_lines.append(f"Dロジくん: {success_line}/{len(line_users)}人に送信")
+    if mybot_users:
+        result_lines.append(f"MYBOT: {success_mybot}/{len(mybot_users)}人に送信")
+
+    await update.message.reply_text("\n".join(result_lines))
+
+
+async def broadcast_line_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """DロジくんLINEユーザーにブロードキャスト送信。"""
+    if not _is_admin(update):
+        await update.message.reply_text("⛔ 管理者のみ使用可能です。")
+        return
+    message = update.message.text.split(None, 1)
+    if len(message) < 2:
+        await update.message.reply_text("使い方: /broadcast_line メッセージ")
+        return
+    await _broadcast_impl(update, "line", message[1])
+
+
+async def broadcast_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Dロジくん + MYBOTユーザー全員にブロードキャスト送信。"""
+    if not _is_admin(update):
+        await update.message.reply_text("⛔ 管理者のみ使用可能です。")
+        return
+    message = update.message.text.split(None, 1)
+    if len(message) < 2:
+        await update.message.reply_text("使い方: /broadcast_all メッセージ")
+        return
+    await _broadcast_impl(update, "all", message[1])
+
+
+async def broadcast_mybot_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """MYBOTユーザーのみにブロードキャスト送信。"""
+    if not _is_admin(update):
+        await update.message.reply_text("⛔ 管理者のみ使用可能です。")
+        return
+    message = update.message.text.split(None, 1)
+    if len(message) < 2:
+        await update.message.reply_text("使い方: /broadcast_mybot メッセージ")
+        return
+    await _broadcast_impl(update, "mybot", message[1])
+
+
+# ---------------------------------------------------------------------------
 # Message & callback handlers
 # ---------------------------------------------------------------------------
 
@@ -941,9 +1120,13 @@ async def post_init(app: Application) -> None:
         BotCommand("maintenance_on", "メンテナンスON"),
         BotCommand("maintenance_off", "メンテナンスOFF"),
         BotCommand("activate", "ウェイトリスト解除"),
+        BotCommand("activate_mybot", "MYBOT待機解除"),
         BotCommand("activate_all", "全員アクティベート"),
         BotCommand("inquiries", "未対応の問い合わせ一覧"),
         BotCommand("resolve", "問い合わせ対応完了"),
+        BotCommand("broadcast_line", "Dロジくんユーザーに送信"),
+        BotCommand("broadcast_all", "全ユーザーに送信"),
+        BotCommand("broadcast_mybot", "MYBOTユーザーに送信"),
     ])
 
 
@@ -966,11 +1149,15 @@ def create_app() -> Application:
     app.add_handler(CommandHandler("maintenance_off", maintenance_off_command))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("activate", activate_command))
+    app.add_handler(CommandHandler("activate_mybot", activate_mybot_command))
     app.add_handler(CommandHandler("activate_all", activate_all_command))
     app.add_handler(CommandHandler("inquiries", inquiries_command))
     app.add_handler(CommandHandler("resolve", resolve_command))
     app.add_handler(CommandHandler("mybot_inquiries", mybot_inquiries_command))
     app.add_handler(CommandHandler("resolve_mybot", resolve_mybot_command))
+    app.add_handler(CommandHandler("broadcast_line", broadcast_line_command))
+    app.add_handler(CommandHandler("broadcast_all", broadcast_all_command))
+    app.add_handler(CommandHandler("broadcast_mybot", broadcast_mybot_command))
 
     # Inline button callback handler
     app.add_handler(CallbackQueryHandler(handle_callback))

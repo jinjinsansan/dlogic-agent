@@ -327,6 +327,9 @@ def get_quick_reply(tools_used: list[str]) -> QuickReply | None:
             items.append(QuickReplyItem(action=MessageAction(label="📈 過去走", text="過去の成績は？")))
         if "get_stable_comments" not in used_set:
             items.append(QuickReplyItem(action=MessageAction(label="🗣️ 関係者情報", text="関係者情報は？")))
+        if "get_odds_probability" not in used_set:
+            items.append(QuickReplyItem(action=MessageAction(label="📊 予測勝率", text="予測勝率見せて")))
+        items.append(QuickReplyItem(action=MessageAction(label="🗳️ みんなの本命", text="みんなの本命比率")))
         items.append(QuickReplyItem(action=MessageAction(label="💬 どう思う？", text="お前はどう思う？")))
 
     elif "get_predictions" in used_set:

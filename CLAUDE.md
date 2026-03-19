@@ -4,6 +4,11 @@
 競馬予想AIエージェント「ディーロジ」。LINE Bot (本番) + Telegram Bot (管理者テスト用) で動作。
 Claude API (Haiku 4.5) の Tool Use でデータ取得・予想エンジン呼び出しを行うエージェント型チャットボット。
 
+## チーム体制
+- **jin（監督）** — プロジェクトオーナー。方針決定・承認・テスト
+- **Claude（オールマイティ作業者）** — 調査・実装・デプロイ・デバッグ全般
+- **Droid / factory-droid（最終監査役）** — アーキテクチャ設計・スケール対応・コスト最適化・コード品質の最終チェック
+
 ## 重要な戦略方針
 - **Dlogicサイトのチャット機能は廃止予定** → LINE Bot一本化
 - **Telegram版は管理者（jin）テスト用** として残す（別サービスで稼働）
@@ -123,7 +128,8 @@ ssh root@220.158.24.157 "journalctl -u dlogic-linebot --since '1 min ago' --no-p
 - **日次ウォーミング**: daily_prefetch.py → warm_cache.py で事前にキャッシュ生成
 
 ## スケーラビリティ
-- **Gunicorn + gevent**: 8ワーカー × 200接続 = 1,600同時接続対応
+- **Gunicorn + gevent**: 2ワーカー × 1000接続 = 2,000同時接続対応（環境変数で調整可能）
+- **Redisセッション共有**: WebChat/MYBOTのセッションをRedisに保存、複数ワーカー間で共有
 - **レスポンスキャッシュ**: 500人同時でも最初の1人以外は即返し
 - **Supabase**: ユーザー管理の永続化、スケール無制限
 
@@ -132,6 +138,12 @@ ssh root@220.158.24.157 "journalctl -u dlogic-linebot --since '1 min ago' --no-p
 - **LINE Bot**: Supabase経由でユーザー管理・メモリ保存
 - **Telegram Bot**: JSON memory (管理者テスト用のため簡易)
 - 構造化プロフィール: favorite_venues, bet_style, risk_level 等
+
+## Droid (factory-droid) の改修について
+- jinさんは別のAIエージェント「Droid」にもコード改修を依頼している
+- **Droidが改修したコードは確認済みの正しい修正であり、勝手に変更・上書き・リファクタリングしないこと**
+- 同じファイルを編集する場合はDroidの既存コードを壊さないよう注意する
+- 不明な場合はjinさんに確認してから編集する
 
 ## 既知の課題・注意事項
 - Haiku は出馬表を省略する傾向がある → system promptで「全頭表示」を厳命

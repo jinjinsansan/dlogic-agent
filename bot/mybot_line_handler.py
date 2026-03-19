@@ -142,6 +142,7 @@ def get_mybot_quick_reply(tools_used: list[str]) -> QuickReply | None:
             items.append(QuickReplyItem(action=MessageAction(label="🗣️ 関係者情報", text="関係者情報は？")))
         if "get_training_comments" not in used_set:
             items.append(QuickReplyItem(action=MessageAction(label="📝 調教評価", text="調教評価は？")))
+        items.append(QuickReplyItem(action=MessageAction(label="🗳️ みんなの本命", text="みんなの本命比率")))
         items.append(QuickReplyItem(action=MessageAction(label="💬 どう思う？", text="お前はどう思う？")))
 
     elif "get_predictions" in used_set:
@@ -152,6 +153,7 @@ def get_mybot_quick_reply(tools_used: list[str]) -> QuickReply | None:
             QuickReplyItem(action=MessageAction(label="⚖️ 馬体重", text="馬体重は？")),
             QuickReplyItem(action=MessageAction(label="🗣️ 関係者情報", text="関係者情報は？")),
             QuickReplyItem(action=MessageAction(label="📝 調教評価", text="調教評価は？")),
+            QuickReplyItem(action=MessageAction(label="🗳️ みんなの本命", text="みんなの本命比率")),
             QuickReplyItem(action=MessageAction(label="💬 どう思う？", text="お前はどう思う？")),
         ]
 
@@ -163,6 +165,7 @@ def get_mybot_quick_reply(tools_used: list[str]) -> QuickReply | None:
             QuickReplyItem(action=MessageAction(label="💰 オッズ", text="オッズ見せて")),
             QuickReplyItem(action=MessageAction(label="⚖️ 馬体重", text="馬体重は？")),
             QuickReplyItem(action=MessageAction(label="🗣️ 関係者情報", text="関係者情報は？")),
+            QuickReplyItem(action=MessageAction(label="🗳️ みんなの本命", text="みんなの本命比率")),
         ]
 
     elif "get_today_races" in used_set:

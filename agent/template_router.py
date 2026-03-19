@@ -425,7 +425,7 @@ def route_and_respond(
 
     # ── Route: predictions (needs race_id from history) ──
     if route_name == "predictions":
-        race_id = find_race_id(history) or active_race_id_hint
+        race_id = active_race_id_hint or find_race_id(history)
         if not race_id:
             return None  # Fall through to Claude
 
@@ -450,7 +450,7 @@ def route_and_respond(
 
     # ── Route: odds ──
     if route_name == "odds":
-        race_id = find_race_id(history) or active_race_id_hint
+        race_id = active_race_id_hint or find_race_id(history)
         if not race_id:
             return None
 
@@ -492,7 +492,7 @@ def route_and_respond(
 
     # ── Route: weights ──
     if route_name == "weights":
-        race_id = find_race_id(history) or active_race_id_hint
+        race_id = active_race_id_hint or find_race_id(history)
         if not race_id:
             return None
 
@@ -521,7 +521,7 @@ def route_and_respond(
 
     # ── Route: odds_probability ──
     if route_name == "odds_probability":
-        race_id = find_race_id(history) or active_race_id_hint
+        race_id = active_race_id_hint or find_race_id(history)
         if not race_id:
             return None
 
@@ -557,7 +557,7 @@ def route_and_respond(
 
     # ── Route: honmei_ratio (みんなの本命比率) ──
     if route_name == "honmei_ratio":
-        race_id = find_race_id(history) or active_race_id_hint
+        race_id = active_race_id_hint or find_race_id(history)
         if not race_id:
             return None
 
@@ -576,7 +576,7 @@ def route_and_respond(
 
     # ── Route: stable_comments (関係者情報) ──
     if route_name == "stable_comments":
-        race_id = find_race_id(history) or active_race_id_hint
+        race_id = active_race_id_hint or find_race_id(history)
         if not race_id:
             return None
 
@@ -597,7 +597,7 @@ def route_and_respond(
 
     # ── Route: training (調教評価) ──
     if route_name == "training":
-        race_id = find_race_id(history) or active_race_id_hint
+        race_id = active_race_id_hint or find_race_id(history)
         if not race_id:
             return None
 
@@ -618,7 +618,7 @@ def route_and_respond(
 
     # ── Route: race_results (レース結果) ──
     if route_name == "race_results":
-        race_id = find_race_id(history) or active_race_id_hint
+        race_id = active_race_id_hint or find_race_id(history)
         if not race_id:
             return None
 
