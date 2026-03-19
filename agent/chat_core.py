@@ -79,17 +79,22 @@ def get_web_quick_replies(tools_used: list[str]) -> list[dict]:
 
 
 def get_mybot_web_quick_replies(tools_used: list[str]) -> list[dict]:
-    """Generate context-appropriate quick replies for MYBOT WebApp (engine-independent tools only)."""
+    """Generate context-appropriate quick replies for MYBOT WebApp."""
     used_set = set(tools_used)
 
-    post_prediction_tools = {
+    # All race-related tools — if any was used, user is analyzing a race
+    race_tools = {
+        "get_predictions", "get_race_entries",
         "get_odds_probability", "get_realtime_odds", "get_horse_weights",
-        "get_stable_comments", "get_training_comments",
+        "get_stable_comments", "get_training_comments", "get_honmei_ratio",
     }
 
     items = []
 
-    if used_set & post_prediction_tools:
+    if used_set & race_tools:
+        # User is analyzing a race — show all unused tools
+        if "get_predictions" not in used_set:
+            items.append({"label": "🎯 予想して", "text": "予想して", "query_type": "predictions"})
         if "get_odds_probability" not in used_set:
             items.append({"label": "📊 予測勝率", "text": "予測勝率見せて", "query_type": "odds_probability"})
         if "get_realtime_odds" not in used_set:
@@ -98,28 +103,8 @@ def get_mybot_web_quick_replies(tools_used: list[str]) -> list[dict]:
             items.append({"label": "⚖️ 馬体重", "text": "馬体重は？", "query_type": "weights"})
         if "get_stable_comments" not in used_set:
             items.append({"label": "🗣️ 関係者情報", "text": "関係者情報は？", "query_type": "stable_comments"})
-        if "get_training_comments" not in used_set:
-            items.append({"label": "📝 調教評価", "text": "調教評価は？", "query_type": "training"})
+        items.append({"label": "🗳️ みんなの本命", "text": "みんなの本命比率", "query_type": "honmei_ratio"})
         items.append({"label": "💬 どう思う？", "text": "お前はどう思う？"})
-
-    elif "get_predictions" in used_set:
-        items = [
-            {"label": "📊 予測勝率", "text": "予測勝率見せて", "query_type": "odds_probability"},
-            {"label": "💰 オッズ", "text": "オッズ見せて", "query_type": "odds"},
-            {"label": "⚖️ 馬体重", "text": "馬体重は？", "query_type": "weights"},
-            {"label": "🗣️ 関係者情報", "text": "関係者情報は？", "query_type": "stable_comments"},
-            {"label": "📝 調教評価", "text": "調教評価は？", "query_type": "training"},
-            {"label": "💬 どう思う？", "text": "お前はどう思う？"},
-        ]
-
-    elif "get_race_entries" in used_set:
-        items = [
-            {"label": "🎯 予想して", "text": "予想して", "query_type": "predictions"},
-            {"label": "📊 予測勝率", "text": "予測勝率見せて", "query_type": "odds_probability"},
-            {"label": "💰 オッズ", "text": "オッズ見せて", "query_type": "odds"},
-            {"label": "⚖️ 馬体重", "text": "馬体重は？", "query_type": "weights"},
-            {"label": "🗣️ 関係者情報", "text": "関係者情報は？", "query_type": "stable_comments"},
-        ]
 
     elif "get_today_races" in used_set:
         items = [

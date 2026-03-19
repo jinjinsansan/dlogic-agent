@@ -604,7 +604,7 @@ def _handle_honmei_selection(event, user_id: str, text: str, profile: dict):
 
         _reply(event.reply_token,
                f"👊 {horse_number}番 {horse_name} を本命で登録したぜ！\n\nみんなの予想に追加したからな。結果出たら回収率も計算してやるよ。",
-               quick_reply=get_quick_reply(["get_race_entries"]))
+               quick_reply=get_quick_reply(["get_predictions"]))
         logger.info(f"Honmei recorded: user={user_id} race={race_id} horse={horse_number} {horse_name}")
         return
 

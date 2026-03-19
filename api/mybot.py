@@ -1277,6 +1277,7 @@ def mybot_chat():
                         f"👊 {horse_number}番 {horse_name} を本命で登録したぜ！\n\n"
                         "みんなの予想に追加したからな。結果出たら回収率も計算してやるよ。",
                         session_id,
+                        quick_replies=get_mybot_web_quick_replies(["get_predictions"]),
                     )
                 except Exception:
                     logger.exception("Failed to record MYBOT web honmei")
@@ -1335,9 +1336,30 @@ def mybot_chat():
                 ))
                 session["history"] = history
                 session["active_race_id"] = race_id
+
+                # Honmei prompt after predictions (fast path)
+                honmei_qr = None
+                profile_id = profile.get("id", "")
+                if profile_id and not profile_id.startswith("anon_"):
+                    try:
+                        from db.prediction_manager import check_prediction as _check_pred
+                        already_picked = _check_pred(profile_id, race_id)
+                    except Exception:
+                        already_picked = True
+                    if not already_picked and _should_prompt_honmei(race_id):
+                        session["pending_honmei_race"] = race_id
+                        honmei_qr = _build_honmei_quick_replies(race_id)
+                        if honmei_qr:
+                            full_text += (
+                                "\n\n━━━━━━━━\n"
+                                "📢 みんなの予想\n"
+                                "━━━━━━━━\n\n"
+                                "お前の本命を教えてくれ！👇"
+                            )
+
                 save_session(auth_key, session)
                 return _sse_text_response(full_text, session_id,
-                                          quick_replies=get_mybot_web_quick_replies(tools_used))
+                                          quick_replies=honmei_qr or get_mybot_web_quick_replies(tools_used))
         else:
             history.append({"role": "user", "content": message})
             result = route_and_respond(
