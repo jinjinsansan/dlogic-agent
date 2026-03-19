@@ -474,7 +474,6 @@ def chat():
                 )
                 session.pop("pending_honmei_race", None)
                 save_session(session_key, session)
-                from agent.chat_core import get_web_quick_replies
                 return _sse_text_response(
                     f"👊 {horse_number}番 {horse_name} を本命で登録したぜ！\n\n"
                     "みんなの予想に追加したからな。結果出たら回収率も計算してやるよ。",
