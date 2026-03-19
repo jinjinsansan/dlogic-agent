@@ -94,10 +94,22 @@ def _clear_active_race(user_id: str, sender_id: str):
             pass
 
 
+def _should_prompt_honmei(race_id: str) -> bool:
+    if not race_id:
+        return False
+    try:
+        from tools.executor import is_future_or_today_race
+        return is_future_or_today_race(race_id)
+    except Exception:
+        return False
+
+
 def _has_pending_honmei(user_id: str, sender_id: str, profile_id: str) -> bool:
     """Check if user has a pending honmei pick."""
     race_id = _get_active_race(user_id, sender_id)
     if not race_id:
+        return False
+    if not _should_prompt_honmei(race_id):
         return False
     try:
         existing = db_check_prediction(profile_id, race_id)
@@ -214,6 +226,13 @@ _SAME_RACE_KEYWORDS = [
 
 def _is_same_race_query(text: str) -> bool:
     return any(kw in text for kw in _SAME_RACE_KEYWORDS)
+
+
+def _needs_race_prompt(text: str) -> bool:
+    return any(kw in text for kw in (
+        "予想", "展開", "騎手", "血統", "オッズ", "馬体重", "調教",
+        "関係者", "結果", "勝率", "出馬表", "本命比率",
+    ))
 
 
 def _get_mybot_profile(user_id: str, sender_id: str, access_token: str) -> dict:
@@ -513,7 +532,7 @@ def _process_message(
                             already_picked = db_check_prediction(profile["id"], active_race_id)
                         except Exception:
                             already_picked = True
-                    if not already_picked:
+                    if not already_picked and _should_prompt_honmei(active_race_id):
                         honmei_qr = get_honmei_quick_reply(active_race_id)
                         if honmei_qr:
                             full_text += (
@@ -884,6 +903,20 @@ def handle_mybot_webhook(user_id: str):
                     logger.info(f"MYBOT LINE account sync: {profile['id'][:10]}... <-> {source_id[:10]}...")
                 else:
                     _reply(access_token, reply_token, "ごめん、連携でエラーが出ちゃった。もう一回試してくれ！")
+                continue
+
+            # Auto-resolve explicit race hints (venue + R, race_id)
+            from tools.executor import resolve_race_id_from_text
+            resolved_race = resolve_race_id_from_text(user_text)
+            if resolved_race:
+                _set_active_race(user_id, sender_id, resolved_race)
+
+            if not _get_active_race(user_id, sender_id) and _needs_race_prompt(user_text):
+                _reply(
+                    access_token,
+                    reply_token,
+                    "どのレースの話だ？\n\n例: 中山11R / 阪神10レース / 20260319-中山-11",
+                )
                 continue
 
             # --- Honmei (本命) selection handler ---

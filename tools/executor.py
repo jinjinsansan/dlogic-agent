@@ -6,7 +6,7 @@ import math
 import os
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 import requests
 
@@ -71,6 +71,113 @@ def _evict_race_cache():
         del _race_cache[key]
     if to_remove:
         logger.info(f"Race cache eviction: removed {len(to_remove)} entries, {len(_race_cache)} remaining")
+
+
+def _normalize_race_date(value: str) -> str | None:
+    if not value:
+        return None
+    if len(value) == 8 and value.isdigit():
+        return f"{value[:4]}-{value[4:6]}-{value[6:8]}"
+    if len(value) >= 10 and value[4] == "-" and value[7] == "-":
+        return value[:10]
+    return None
+
+
+def _extract_race_date_from_id(race_id: str) -> str | None:
+    if len(race_id) >= 8 and race_id[:8].isdigit():
+        return f"{race_id[:4]}-{race_id[4:6]}-{race_id[6:8]}"
+    return None
+
+
+def get_race_date(race_id: str) -> str | None:
+    """Return normalized race_date (YYYY-MM-DD) when available."""
+    if not race_id:
+        return None
+    cached = _race_cache.get(race_id, {}).get("entries", {})
+    cached_date = cached.get("race_date") or cached.get("date")
+    normalized = _normalize_race_date(cached_date) if cached_date else None
+    if normalized:
+        return normalized
+    return _extract_race_date_from_id(race_id)
+
+
+def is_future_or_today_race(race_id: str) -> bool:
+    """Return True if race date is today or in the future (JST)."""
+    date_str = get_race_date(race_id)
+    if not date_str:
+        return False
+    try:
+        race_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError:
+        return False
+    today = datetime.now(timezone(timedelta(hours=9))).date()
+    return race_date >= today
+
+
+JRA_VENUES = [
+    "札幌", "函館", "福島", "新潟", "東京", "中山", "中京", "京都", "阪神", "小倉",
+]
+_ALL_VENUES = JRA_VENUES + NAR_VENUES
+_EXPLICIT_RACE_ID_RE = re.compile(r"\d{8}-[^\s]+?-\d+")
+_NETKEIBA_RACE_ID_RE = re.compile(r"\b\d{10,12}\b")
+_RACE_NUMBER_RE = re.compile(r"(?:第)?(\d{1,2})\s*(?:R|Ｒ|r|レース)", re.IGNORECASE)
+
+
+def resolve_race_id_from_text(text: str) -> str | None:
+    """Resolve race_id from explicit hints (venue+R or direct race_id)."""
+    if not text:
+        return None
+
+    explicit = _EXPLICIT_RACE_ID_RE.search(text)
+    if explicit:
+        return explicit.group(0)
+
+    netkeiba = _NETKEIBA_RACE_ID_RE.search(text)
+    if netkeiba:
+        return netkeiba.group(0)
+
+    match = _RACE_NUMBER_RE.search(text)
+    if not match:
+        return None
+
+    try:
+        race_number = int(match.group(1))
+    except ValueError:
+        return None
+
+    venue = ""
+    for v in _ALL_VENUES:
+        if v in text:
+            venue = v
+            break
+
+    def _load_today(race_type: str) -> list[dict]:
+        try:
+            data = json.loads(_get_today_races({"race_type": race_type}))
+            return data.get("races", [])
+        except Exception:
+            return []
+
+    race_types = []
+    if venue and venue in NAR_VENUES:
+        race_types = ["nar"]
+    elif venue and venue in JRA_VENUES:
+        race_types = ["jra"]
+    else:
+        race_types = ["jra", "nar"]
+
+    candidates: list[dict] = []
+    for race_type in race_types:
+        for race in _load_today(race_type):
+            if race.get("race_number") != race_number:
+                continue
+            if venue and venue not in race.get("venue", ""):
+                continue
+            candidates.append(race)
+
+    if len(candidates) == 1:
+        return candidates[0].get("race_id")
+    return None
 
 
 # Display engine brand names
@@ -429,6 +536,7 @@ def _get_race_entries(params: dict) -> str:
                     "entries": entries,
                     "source": "prefetch",
                     "odds": pf.get('odds', []),
+                    "race_date": pf.get('race_date', '') or pf.get('date', ''),
                 }
                 if pf.get('predictions'):
                     result["predictions"] = _rename_prediction_keys(pf['predictions'])
@@ -484,6 +592,7 @@ def _get_race_entries(params: dict) -> str:
                     "track_condition": arch.track_condition,
                     "headcount": len(arch.horses),
                     "entries": entries,
+                    "race_date": arch.race_date,
                 }
 
                 if arch.predictions:
@@ -1024,6 +1133,12 @@ def _cache_race_data(race_id: str, entries: list[dict], race_info: dict):
     venue = race_info.get("venue", "")
     race_type = "nar" if any(v in venue for v in NAR_VENUES) else "jra"
 
+    race_date = (
+        _normalize_race_date(race_info.get("race_date", ""))
+        or _normalize_race_date(race_info.get("date", ""))
+        or _extract_race_date_from_id(race_id)
+    )
+
     _race_cache[race_id]["entries"] = {
         "horses": [e["horse_name"] for e in entries],
         "horse_numbers": [e["horse_number"] for e in entries],
@@ -1036,6 +1151,7 @@ def _cache_race_data(race_id: str, entries: list[dict], race_info: dict):
         "race_type": race_type,
         "race_name": race_info.get("race_name", ""),
         "odds": race_info.get("odds", []),
+        "race_date": race_date or "",
     }
     logger.info(f"Cached race data for {race_id}: {len(entries)} horses")
 
@@ -1177,6 +1293,9 @@ def _get_my_stats(params: dict, context: dict | None) -> str:
     from db.prediction_manager import get_user_predictions
 
     uid = context["user_profile_id"]
+    # Web sessions have non-UUID IDs — stats not available
+    if uid.startswith("web_") or uid.startswith("anon_"):
+        return json.dumps({"error": "Webチャットでは成績機能は使えません。LINE Botで利用してください。"}, ensure_ascii=False)
     stats = get_user_stats(uid)
     recent = get_user_recent_results(uid, limit=10)
 

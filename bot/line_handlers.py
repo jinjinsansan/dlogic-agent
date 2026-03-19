@@ -24,7 +24,7 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent, A
 
 from agent.engine import trim_history, format_tool_notification
 from agent.chat_core import run_agent
-from agent.response_cache import find_race_id
+from agent.response_cache import find_race_id, detect_query_type
 from config import LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, ONBOARDING_TEXT
 from db.user_manager import (
     get_or_create_user as db_get_or_create_user,
@@ -47,7 +47,7 @@ from db.prediction_manager import (
     check_prediction as db_check_prediction,
 )
 from db.redis_client import get_redis
-from tools.executor import execute_tool
+from tools.executor import execute_tool, resolve_race_id_from_text
 
 logger = logging.getLogger(__name__)
 
@@ -272,10 +272,31 @@ def _is_same_race_query(text: str) -> bool:
     return False
 
 
+def _needs_race_prompt(text: str) -> bool:
+    if detect_query_type(text):
+        return True
+    return any(kw in text for kw in (
+        "予想", "展開", "騎手", "血統", "オッズ", "馬体重", "調教",
+        "関係者", "結果", "勝率", "出馬表", "本命比率",
+    ))
+
+
+def _should_prompt_honmei(race_id: str) -> bool:
+    if not race_id:
+        return False
+    try:
+        from tools.executor import is_future_or_today_race
+        return is_future_or_today_race(race_id)
+    except Exception:
+        return False
+
+
 def _has_pending_honmei(user_id: str, profile_id: str) -> bool:
     """Check if user has a pending honmei pick (viewed race but hasn't picked)."""
     race_id = _get_active_race(user_id)
     if not race_id:
+        return False
+    if not _should_prompt_honmei(race_id):
         return False
     existing = _safe_db_call(db_check_prediction, profile_id, race_id, default="error")
     if existing == "error":
@@ -888,6 +909,19 @@ def handle_message(event: MessageEvent):
         _reply(event.reply_token, ONBOARDING_TEXT, quick_reply=get_start_quick_reply())
         return
 
+    # Auto-resolve explicit race hints (venue + R, race_id)
+    resolved_race = resolve_race_id_from_text(user_text)
+    if resolved_race:
+        _set_active_race(user_id, resolved_race)
+
+    # Ask for race if missing context
+    if not _get_active_race(user_id) and _needs_race_prompt(user_text):
+        _reply(
+            event.reply_token,
+            "どのレースの話だ？\n\n例: 中山11R / 阪神10レース / 20260319-中山-11",
+        )
+        return
+
     # Handle ranking directly (no Claude API call needed — always returns "no data")
     if user_text in ("ランキング見せて", "ランキング", "みんなの成績"):
         _reply(
@@ -997,7 +1031,7 @@ def handle_message(event: MessageEvent):
                         already_picked = _safe_db_call(db_check_prediction, profile["id"], active_race_id, default="error")
                         if already_picked == "error":
                             already_picked = True
-                    if not already_picked:
+                    if not already_picked and _should_prompt_honmei(active_race_id):
                         honmei_qr = get_honmei_quick_reply(active_race_id)
                         if honmei_qr:
                             full_text += (

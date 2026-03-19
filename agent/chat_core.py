@@ -9,6 +9,7 @@ Yields chunks as the conversation progresses:
 
 import logging
 import random
+import re
 
 from agent.engine import (
     call_claude, build_system_prompt, extract_text, get_tool_blocks,
@@ -142,6 +143,16 @@ _MEMORY_SKIP_TOOLS = {
 }
 
 
+_RACE_HINT_RE = re.compile(
+    r"(\d{8}-[^\s]+?-\d+|\b\d{10,12}\b|第?\d+\s*(?:R|レース))",
+    re.IGNORECASE,
+)
+
+
+def _has_explicit_race_hint(message: str) -> bool:
+    return bool(_RACE_HINT_RE.search(message))
+
+
 def run_agent(
     user_message: str,
     history: list[dict],
@@ -197,7 +208,7 @@ def run_agent(
     history = trim_history(history)
 
     # ── Template router: bypass Claude for deterministic queries ──
-    route = match_route(user_message)
+    route = match_route(user_message) if not _has_explicit_race_hint(user_message) else None
     if route:
         route_name, route_params = route
         logger.info(f"Template route matched: {route_name}")
@@ -239,8 +250,8 @@ def run_agent(
 
     # ── Pre-loop cache check ──
     query_type = detect_query_type(user_message)
-    if query_type:
-        race_id = find_race_id(history) or active_race_id_hint
+    if query_type and not _has_explicit_race_hint(user_message):
+        race_id = active_race_id_hint or find_race_id(history)
         if race_id:
             cached = get_cached_response(race_id, query_type)
             if cached:
