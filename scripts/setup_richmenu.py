@@ -72,7 +72,7 @@ def generate_image(output_path: str):
         ("地方",   "今日の地方", True),
         ("HELP",  "使い方",     False),
         ("STATS", "俺の成績",   True),
-        ("RANK",  "ランキング", True),
+        ("MYBOT", "MYBOT",     True),
         ("CONTACT", "問い合わせ", False),
     ]
 
@@ -166,7 +166,7 @@ def create_richmenu() -> str:
             },
             {
                 "bounds": {"x": cell_w, "y": cell_h, "width": cell_w, "height": cell_h},
-                "action": {"type": "message", "text": "ランキング見せて"}
+                "action": {"type": "uri", "uri": "https://www.dlogicai.in/mybot/create"}
             },
             {
                 "bounds": {"x": cell_w * 2, "y": cell_h, "width": cell_w, "height": cell_h},

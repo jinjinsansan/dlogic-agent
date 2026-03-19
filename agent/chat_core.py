@@ -37,10 +37,20 @@ logger = logging.getLogger(__name__)
 def get_web_quick_replies(tools_used: list[str]) -> list[dict]:
     """Generate context-appropriate quick reply buttons for WebApp (same logic as LINE)."""
     used_set = set(tools_used)
-    analysis_tools = {"get_race_flow", "get_jockey_analysis", "get_bloodline_analysis", "get_recent_runs", "get_stable_comments"}
     items = []
 
-    if used_set & analysis_tools:
+    # All race-related tools — if any was used, user is analyzing a race
+    race_tools = {
+        "get_predictions", "get_race_entries", "get_race_flow",
+        "get_jockey_analysis", "get_bloodline_analysis", "get_recent_runs",
+        "get_stable_comments", "get_realtime_odds", "get_odds_probability",
+        "get_horse_weights", "get_training_comments", "get_honmei_ratio",
+    }
+
+    if used_set & race_tools:
+        # User is analyzing a race — show all unused tools
+        if "get_predictions" not in used_set:
+            items.append({"label": "🎯 予想して", "text": "予想して", "query_type": "predictions"})
         if "get_race_flow" not in used_set:
             items.append({"label": "🔄 展開予想", "text": "展開は？"})
         if "get_jockey_analysis" not in used_set:
@@ -51,28 +61,14 @@ def get_web_quick_replies(tools_used: list[str]) -> list[dict]:
             items.append({"label": "📈 過去走", "text": "過去の成績は？"})
         if "get_stable_comments" not in used_set:
             items.append({"label": "🗣️ 関係者情報", "text": "関係者情報は？", "query_type": "stable_comments"})
+        if "get_odds_probability" not in used_set:
+            items.append({"label": "📊 予測勝率", "text": "予測勝率見せて", "query_type": "odds_probability"})
+        if "get_realtime_odds" not in used_set:
+            items.append({"label": "💰 オッズは？", "text": "オッズ見せて", "query_type": "odds"})
+        if "get_horse_weights" not in used_set:
+            items.append({"label": "⚖️ 馬体重", "text": "馬体重は？", "query_type": "weights"})
+        items.append({"label": "🗳️ みんなの本命", "text": "みんなの本命比率", "query_type": "honmei_ratio"})
         items.append({"label": "💬 どう思う？", "text": "お前はどう思う？"})
-
-    elif "get_predictions" in used_set:
-        items = [
-            {"label": "🔄 展開予想", "text": "展開は？"},
-            {"label": "🏇 騎手分析", "text": "騎手の成績は？"},
-            {"label": "🧬 血統分析", "text": "血統は？"},
-            {"label": "📈 過去走", "text": "過去の成績は？"},
-            {"label": "🗣️ 関係者情報", "text": "関係者情報は？", "query_type": "stable_comments"},
-            {"label": "🗳️ みんなの本命", "text": "みんなの本命比率", "query_type": "honmei_ratio"},
-            {"label": "🔥 全部見る", "text": "全部掘り下げて"},
-            {"label": "💬 どう思う？", "text": "お前はどう思う？"},
-        ]
-
-    elif "get_race_entries" in used_set:
-        items = [
-            {"label": "🎯 予想して", "text": "予想して", "query_type": "predictions"},
-            {"label": "📊 予測勝率", "text": "予測勝率見せて", "query_type": "odds_probability"},
-            {"label": "💰 オッズは？", "text": "オッズ見せて", "query_type": "odds"},
-            {"label": "⚖️ 馬体重", "text": "馬体重は？", "query_type": "weights"},
-            {"label": "🗣️ 関係者情報", "text": "関係者情報は？", "query_type": "stable_comments"},
-        ]
 
     elif "get_today_races" in used_set:
         items = [

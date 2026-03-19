@@ -119,19 +119,22 @@ def _has_pending_honmei(user_id: str, sender_id: str, profile_id: str) -> bool:
 
 
 def get_mybot_quick_reply(tools_used: list[str]) -> QuickReply | None:
-    """Get context-appropriate quick reply buttons for MYBOT (engine-independent tools only)."""
+    """Get context-appropriate quick reply buttons for MYBOT."""
     used_set = set(tools_used)
 
-    # Tools that are post-analysis (already got predictions/odds/etc)
-    post_prediction_tools = {
+    # All race-related tools — if any was used, user is analyzing a race
+    race_tools = {
+        "get_predictions", "get_race_entries",
         "get_odds_probability", "get_realtime_odds", "get_horse_weights",
-        "get_stable_comments", "get_training_comments",
+        "get_stable_comments", "get_training_comments", "get_honmei_ratio",
     }
 
     items = []
 
-    if used_set & post_prediction_tools:
-        # After analysis — show remaining engine-independent tools
+    if used_set & race_tools:
+        # User is analyzing a race — show all unused tools
+        if "get_predictions" not in used_set:
+            items.append(QuickReplyItem(action=MessageAction(label="🎯 予想して", text="予想して")))
         if "get_odds_probability" not in used_set:
             items.append(QuickReplyItem(action=MessageAction(label="📊 予測勝率", text="予測勝率見せて")))
         if "get_realtime_odds" not in used_set:
@@ -144,29 +147,6 @@ def get_mybot_quick_reply(tools_used: list[str]) -> QuickReply | None:
             items.append(QuickReplyItem(action=MessageAction(label="📝 調教評価", text="調教評価は？")))
         items.append(QuickReplyItem(action=MessageAction(label="🗳️ みんなの本命", text="みんなの本命比率")))
         items.append(QuickReplyItem(action=MessageAction(label="💬 どう思う？", text="お前はどう思う？")))
-
-    elif "get_predictions" in used_set:
-        # After IMLogic prediction — deep dive options
-        items = [
-            QuickReplyItem(action=MessageAction(label="📊 予測勝率", text="予測勝率見せて")),
-            QuickReplyItem(action=MessageAction(label="💰 オッズ", text="オッズ見せて")),
-            QuickReplyItem(action=MessageAction(label="⚖️ 馬体重", text="馬体重は？")),
-            QuickReplyItem(action=MessageAction(label="🗣️ 関係者情報", text="関係者情報は？")),
-            QuickReplyItem(action=MessageAction(label="📝 調教評価", text="調教評価は？")),
-            QuickReplyItem(action=MessageAction(label="🗳️ みんなの本命", text="みんなの本命比率")),
-            QuickReplyItem(action=MessageAction(label="💬 どう思う？", text="お前はどう思う？")),
-        ]
-
-    elif "get_race_entries" in used_set:
-        # After entry list — prediction + info tools
-        items = [
-            QuickReplyItem(action=MessageAction(label="🎯 予想して", text="予想して")),
-            QuickReplyItem(action=MessageAction(label="📊 予測勝率", text="予測勝率見せて")),
-            QuickReplyItem(action=MessageAction(label="💰 オッズ", text="オッズ見せて")),
-            QuickReplyItem(action=MessageAction(label="⚖️ 馬体重", text="馬体重は？")),
-            QuickReplyItem(action=MessageAction(label="🗣️ 関係者情報", text="関係者情報は？")),
-            QuickReplyItem(action=MessageAction(label="🗳️ みんなの本命", text="みんなの本命比率")),
-        ]
 
     elif "get_today_races" in used_set:
         # After race list — offer main race

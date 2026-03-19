@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _ROUTES: list[tuple[re.Pattern, str, dict]] = [
+    # Self-introduction (static, no API call)
+    (re.compile(r"(ディーロジ|Dロジ|dロジ)(くん)?(って|とは|は何|ってなに|について)"), "self_intro", {}),
+    # Inquiry (static guidance, no API call)
+    (re.compile(r"問い合わせ(したい|する|を|は)?"), "inquiry", {}),
     # Race lists
     (re.compile(r"(今日の|きょうの)?(JRA|jra|中央)"), "today_races", {"race_type": "jra"}),
     (re.compile(r"(今日の|きょうの)?(地方|NAR|nar|地方競馬)"), "today_races", {"race_type": "nar"}),
@@ -404,6 +408,32 @@ def route_and_respond(
             except Exception:
                 pass
 
+    # ── Route: self_intro (static, $0) ──
+    if route_name == "self_intro":
+        text = (
+            "俺は「ディーロジ」。お前の競馬予想の相棒だ。\n"
+            "JRA・地方競馬の予想を24時間サポートするぜ。\n\n"
+            "━━ 予想エンジン ━━\n"
+            "【Dlogic】統計分析。堅実な予想が強み。\n"
+            "【Ilogic】過去走パターン分析。穴馬発見に強い。\n"
+            "【ViewLogic】展開・位置取りシミュレーション。\n"
+            "【MetaLogic】上の3つを総合判断するAI。\n\n"
+            "━━ 掘り下げエンジン ━━\n"
+            "展開予想／騎手分析／血統分析／過去走／予測勝率\n\n"
+            "まずは「今日のJRA」「今日の地方競馬」で今日のレースを見てみろ！"
+        )
+        return {"text": text, "footer": "", "tools_used": [], "history_entries": []}
+
+    # ── Route: inquiry (static, $0) ──
+    if route_name == "inquiry":
+        text = (
+            "問い合わせは以下の手順で送れるぜ。\n\n"
+            "そのまま問い合わせ内容を書いて送ってくれ。\n"
+            "例：「予想の表示がおかしい」「こんな機能がほしい」\n\n"
+            "運営に直接届くから、気軽に送ってくれ！"
+        )
+        return {"text": text, "footer": "", "tools_used": [], "history_entries": []}
+
     # ── Route: today_races ──
     if route_name == "today_races":
         race_type = route_params.get("race_type", "jra")
@@ -732,7 +762,7 @@ def _fmt_honmei_ratio(race_id: str) -> str:
     lines = []
     header = f"【{venue} {race_name}】" if race_name else f"【{race_id}】"
     lines.append(f"📊 みんなの本命比率 {header}")
-    lines.append(f"━━━━━━━━ 投票数: {total}")
+    lines.append("━━━━━━━━")
     lines.append("")
 
     bar_chars = "█▉▊▋▌▍▎▏"
@@ -749,7 +779,7 @@ def _fmt_honmei_ratio(race_id: str) -> str:
 
         medal = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else "  "
         lines.append(f"{medal} {num}番 {info['name']}")
-        lines.append(f"   {bar} {pct:.0f}%（{info['count']}票）")
+        lines.append(f"   {bar} {pct:.0f}%")
 
     lines.append("")
     lines.append("━━━━━━━━")

@@ -837,9 +837,10 @@ def _get_realtime_odds(params: dict) -> str:
     # Check realtime cache (with TTL)
     if race_id in _race_cache and "realtime" in _race_cache[race_id]:
         rt = _race_cache[race_id]["realtime"]
-        if time.time() - rt["fetched_at"] < _REALTIME_TTL:
+        odds_data = rt.get("odds")
+        if time.time() - rt["fetched_at"] < _REALTIME_TTL and odds_data:
             logger.info(f"Realtime cache hit for {race_id} (age: {time.time() - rt['fetched_at']:.0f}s)")
-            sorted_odds = dict(sorted(rt["odds"].items()))
+            sorted_odds = dict(sorted(odds_data.items()))
             result = {
                 "race_id": race_id,
                 "odds": {str(k): v for k, v in sorted_odds.items()},

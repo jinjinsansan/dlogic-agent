@@ -575,7 +575,7 @@ def chat():
                     # Honmei (みんなの予想) prompt for authenticated users
                     if auth_payload and not profile.get("web_session") and active_race_id:
                         used_set = set(tools_used)
-                        if used_set & {"get_race_entries", "get_predictions"}:
+                        if used_set & {"get_predictions"}:
                             try:
                                 already_picked = db_check_prediction(profile["id"], active_race_id)
                             except Exception:

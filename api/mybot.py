@@ -1413,7 +1413,7 @@ def mybot_chat():
 
                     # Honmei (みんなの予想) for Web
                     used_set = set(tools_used)
-                    if used_set & {"get_race_entries", "get_predictions"} and active_race_id:
+                    if used_set & {"get_predictions"} and active_race_id:
                         profile_id = profile.get("id", "")
                         if not profile_id.startswith("anon_"):
                             try:

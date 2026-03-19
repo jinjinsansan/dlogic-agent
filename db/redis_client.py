@@ -4,6 +4,12 @@ import logging
 import os
 
 try:
+    from dotenv import load_dotenv
+    load_dotenv(".env.local")
+except Exception:
+    pass
+
+try:
     import redis
 except Exception:  # pragma: no cover - optional dependency
     redis = None
