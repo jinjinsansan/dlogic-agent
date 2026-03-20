@@ -600,7 +600,7 @@ def _handle_honmei_selection(event, user_id: str, text: str, profile: dict):
         default=None,
     )
     if record:
-        _clear_active_race(user_id)
+        # アクティブレースはクリアしない（本命登録後も分析を続けられるようにする）
 
         _reply(event.reply_token,
                f"👊 {horse_number}番 {horse_name} を本命で登録したぜ！\n\nみんなの予想に追加したからな。結果出たら回収率も計算してやるよ。",

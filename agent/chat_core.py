@@ -181,8 +181,14 @@ def run_agent(
         if race_name or venue:
             user_context += (
                 f"\n\n【現在のレース】{venue} {race_name} (race_id: {active_race_id_hint})\n"
-                f"ユーザーが「予想は？」「展開は？」「どう思う？」「分析は？」等と聞いた場合、"
-                f"このレースについて答えろ。レースを聞き返すな。"
+                f"ユーザーが何を聞いても、このレースについて答えろ。レースを聞き返すな。"
+                f"自由な質問（馬連、3連単、おすすめ等）もこのレースの話だと判断しろ。"
+            )
+        else:
+            user_context += (
+                f"\n\n【現在のレース】race_id: {active_race_id_hint}\n"
+                f"ユーザーは今このレースを分析中。レースを聞き返すな。"
+                f"まずget_race_entriesでこのレースのデータを取得してから答えろ。"
             )
 
     system = build_system_prompt(user_context)
