@@ -959,6 +959,7 @@ def handle_message(event: MessageEvent):
     pending_notice_tools: list[str] = []
     pending_notice_timer: threading.Timer | None = None
     notice_lock = threading.Lock()
+    final_sent = False
 
     try:
         for chunk in run_agent(
@@ -984,12 +985,15 @@ def handle_message(event: MessageEvent):
                     if pending_notice_timer is None:
                         def _send_delayed_notice():
                             with notice_lock:
+                                if final_sent:
+                                    return
                                 tools = list(dict.fromkeys(pending_notice_tools))
                             if not tools:
                                 return
                             try:
                                 notice = format_tool_notification(tools)
-                                _push(user_id, notice)
+                                # If this notice is the last message (race condition), keep Quick Reply visible.
+                                _push(user_id, notice, quick_reply=get_quick_reply(tools))
                             except Exception:
                                 logger.exception("Failed to send tool notification")
 
@@ -998,6 +1002,7 @@ def handle_message(event: MessageEvent):
                         pending_notice_timer.start()
 
             elif chunk_type == "done":
+                final_sent = True
                 if pending_notice_timer and pending_notice_timer.is_alive():
                     pending_notice_timer.cancel()
 
