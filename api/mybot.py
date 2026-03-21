@@ -602,45 +602,46 @@ def get_public_bot(bot_user_id):
 
 @bp.route("/api/mybot/public/list", methods=["GET"])
 def list_public_bots():
-    """List all public bots for the みんなのAIBOT page."""
+    """List all public bots for the みんなのAIBOT page.
+
+    Query params:
+        sort: new | popular | recovery (default: new)
+        limit: max items per page (default 50, max 100)
+        offset: pagination offset
+        search: optional search query (matches bot_name and owner display_name)
+    """
     sort = request.args.get("sort", "new")
     limit = min(int(request.args.get("limit", 50)), 100)
     offset = int(request.args.get("offset", 0))
+    search = (request.args.get("search") or "").strip().lower()
 
     sb = get_client()
 
-    # Get total count of public bots
-    count_result = (
-        sb.table("mybot_settings")
-        .select("user_id", count="exact")
-        .eq("is_public", True)
-        .execute()
-    )
-    total = count_result.count or 0
-
-    # Fetch public bots (always order by updated_at as base)
+    # Fetch ALL public bots (for correct sort + search across full dataset)
     bots_result = (
         sb.table("mybot_settings")
         .select("bot_name, catchphrase, self_introduction, icon_url, user_id, chat_theme, updated_at")
         .eq("is_public", True)
         .order("updated_at", desc=True)
-        .range(offset, offset + limit - 1)
         .execute()
     )
 
     bots = [b for b in (bots_result.data or []) if b["user_id"] not in _RESERVED_UUIDS]
 
     if not bots:
-        return jsonify({"bots": [], "total": total})
+        dlogic_card = _get_dlogic_stats(sb)
+        dlogic_follows = sb.table("mybot_follows").select("id", count="exact").eq("bot_user_id", DLOGIC_OFFICIAL_BOT_ID).execute()
+        dlogic_card["follower_count"] = dlogic_follows.count or 0
+        return jsonify({"bots": [], "total": 0, "dlogic": dlogic_card})
 
-    # Collect user_ids to batch-fetch owner profiles and follower counts
-    user_ids = [b["user_id"] for b in bots]
+    # Collect all user_ids to batch-fetch profiles, followers, stats
+    all_user_ids = [b["user_id"] for b in bots]
 
     # Fetch owner profiles
     profiles_result = (
         sb.table("user_profiles")
         .select("id, display_name, icon_url, x_account")
-        .in_("id", user_ids)
+        .in_("id", all_user_ids)
         .execute()
     )
     profiles_map = {p["id"]: p for p in (profiles_result.data or [])}
@@ -649,7 +650,7 @@ def list_public_bots():
     follows_result = (
         sb.table("mybot_follows")
         .select("bot_user_id")
-        .in_("bot_user_id", user_ids)
+        .in_("bot_user_id", all_user_ids)
         .execute()
     )
     follower_counts = {}
@@ -661,7 +662,7 @@ def list_public_bots():
     stats_result = (
         sb.table("mybot_stats")
         .select("bot_user_id, recovery_rate, win_rate, total_predictions")
-        .in_("bot_user_id", user_ids)
+        .in_("bot_user_id", all_user_ids)
         .execute()
     )
     stats_map = {s["bot_user_id"]: s for s in (stats_result.data or [])}
@@ -670,7 +671,7 @@ def list_public_bots():
     line_result = (
         sb.table("mybot_line_channels")
         .select("user_id, basic_id")
-        .in_("user_id", user_ids)
+        .in_("user_id", all_user_ids)
         .execute()
     )
     line_map = {l["user_id"]: l.get("basic_id", "") for l in (line_result.data or [])}
@@ -688,20 +689,27 @@ def list_public_bots():
         bot["win_rate"] = stats.get("win_rate", 0)
         bot["total_predictions"] = stats.get("total_predictions", 0)
         basic_id = line_map.get(uid, "")
-        # basic_id may already include @ prefix
         clean_id = basic_id.lstrip("@") if basic_id else ""
         bot["line_url"] = f"https://line.me/R/ti/p/@{clean_id}" if clean_id else ""
 
-    # Sort
+    # Search filter (bot_name + owner_name)
+    if search:
+        bots = [b for b in bots if search in b["bot_name"].lower() or search in (b.get("owner_name") or "").lower()]
+
+    # Sort across full dataset
     if sort == "popular":
         bots.sort(key=lambda b: b["follower_count"], reverse=True)
     elif sort == "recovery":
         bots.sort(key=lambda b: (b["total_predictions"] > 0, b["recovery_rate"]), reverse=True)
+    # sort == "new" is already sorted by updated_at desc from Supabase
 
-    # Prepend Dlogic official bot (always at top)
+    total = len(bots)
+
+    # Paginate after sort + search
+    bots = bots[offset:offset + limit]
+
+    # Dlogic official bot stats
     dlogic_card = _get_dlogic_stats(sb)
-
-    # Dlogic follower count
     dlogic_follows = (
         sb.table("mybot_follows")
         .select("id", count="exact")
