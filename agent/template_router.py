@@ -418,6 +418,24 @@ def _fmt_stable_comments(data: dict) -> str:
     """Format stable/trainer comments for LINE display."""
     comments = data.get("comments", [])
     if not comments:
+        stable_comments = data.get("stable_comments", {})
+        if isinstance(stable_comments, dict) and stable_comments:
+            comments = []
+            for num, info in stable_comments.items():
+                try:
+                    horse_num = int(num)
+                except (TypeError, ValueError):
+                    horse_num = num
+                if not isinstance(info, dict):
+                    continue
+                comments.append({
+                    "horse_number": horse_num,
+                    "horse_name": info.get("horse_name", "?"),
+                    "rank": info.get("mark", ""),
+                    "condition": info.get("status", ""),
+                    "comment": info.get("comment", ""),
+                })
+    if not comments:
         return data.get("note", "関係者情報がまだ出てないみたいだ。")
 
     lines = ["━━ 関係者情報 ━━"]

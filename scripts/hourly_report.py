@@ -18,6 +18,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
@@ -42,6 +43,44 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 logger = logging.getLogger(__name__)
 
 JST = timezone(timedelta(hours=9))
+
+
+def _get_vpn_status() -> dict:
+    status = {
+        "wg_connected": False,
+        "handshake_age": None,
+        "netkeiba_code": "-",
+    }
+
+    try:
+        result = subprocess.run(
+            ["wg", "show", "wg0", "latest-handshakes"],
+            capture_output=True, text=True, timeout=5,
+        )
+        line = result.stdout.strip().split()
+        if len(line) >= 2:
+            ts = int(line[-1])
+            if ts > 0:
+                age = int(time.time() - ts)
+                status["handshake_age"] = age
+                status["wg_connected"] = age < 180
+    except Exception:
+        pass
+
+    try:
+        resp = subprocess.run(
+            [
+                "curl", "-4", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+                "--connect-timeout", "6", "--max-time", "10",
+                "https://race.netkeiba.com/race/shutuba.html?race_id=202606020801",
+            ],
+            capture_output=True, text=True, timeout=12,
+        )
+        status["netkeiba_code"] = resp.stdout.strip() or "-"
+    except Exception:
+        pass
+
+    return status
 
 
 def _get_logs(service: str, since_minutes: int = 60) -> str:
@@ -140,6 +179,8 @@ def _format_report(metrics: dict) -> str:
     hour_str = now.strftime("%H:%M")
     date_str = now.strftime("%m/%d")
 
+    vpn_status = _get_vpn_status()
+
     total_requests = (
         metrics["line_messages"]
         + metrics["web_chat_requests"]
@@ -192,6 +233,16 @@ def _format_report(metrics: dict) -> str:
 
     if metrics["errors"] > 0:
         lines.append(f"⚠️ エラー: {metrics['errors']}件")
+
+    lines.append("")
+    lines.append("🛡️ VPN")
+    if vpn_status["wg_connected"]:
+        hs = vpn_status["handshake_age"]
+        hs_str = f"{hs}s" if hs is not None else "-"
+        lines.append(f"  WireGuard: OK (handshake {hs_str})")
+    else:
+        lines.append("  WireGuard: NG")
+    lines.append(f"  netkeiba: HTTP {vpn_status['netkeiba_code']}")
 
     # Quiet hour indicator
     if total_requests == 0:

@@ -209,11 +209,24 @@ _netkeiba_id_cache: dict[str, str] = {}
 _MAX_NETKEIBA_CACHE_SIZE = 200
 
 
-def _resolve_netkeiba_race_id(race_id: str, race_type: str = "jra") -> str:
+def _is_valid_netkeiba_id(netkeiba_id: str, date_str: str, race_type: str) -> bool:
+    if not netkeiba_id or not netkeiba_id.isdigit():
+        return False
+    if race_type == "nar":
+        return True
+    return len(netkeiba_id) >= 8 and netkeiba_id.startswith(date_str)
+
+
+def _resolve_netkeiba_race_id(
+    race_id: str,
+    race_type: str = "jra",
+    force_scrape: bool = False,
+) -> str:
     """Resolve custom race_id (YYYYMMDD-venue-num) to netkeiba race_id.
 
     If already a netkeiba ID (all digits, 10-12 chars), return as-is.
     Resolution order: memory cache → prefetch data → scraper fallback.
+    If force_scrape=True, skip cache/prefetch and use scraper fallback.
     """
     # Already a netkeiba ID
     if race_id.isdigit() and len(race_id) >= 10:
@@ -224,33 +237,35 @@ def _resolve_netkeiba_race_id(race_id: str, race_type: str = "jra") -> str:
     if not m:
         return race_id  # Unknown format, return as-is
 
-    # Check memory cache
-    if race_id in _netkeiba_id_cache:
-        return _netkeiba_id_cache[race_id]
+    if not force_scrape:
+        # Check memory cache
+        if race_id in _netkeiba_id_cache:
+            return _netkeiba_id_cache[race_id]
 
     date_str = m.group(1)  # YYYYMMDD
     venue = m.group(2)
     race_number = int(m.group(3))
 
-    # Method 1: Check prefetch data (most reliable)
-    prefetch_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        'data', 'prefetch', f'races_{date_str}.json',
-    )
-    if os.path.exists(prefetch_path):
-        try:
-            with open(prefetch_path, 'r', encoding='utf-8') as f:
-                prefetch_data = json.load(f)
-            for r in prefetch_data.get("races", []):
-                rid = r.get("race_id", "")
-                nk_id = r.get("race_id_netkeiba", "")
-                if rid and nk_id:
-                    _netkeiba_id_cache[rid] = nk_id
-            if race_id in _netkeiba_id_cache:
-                logger.info(f"Resolved via prefetch: {race_id} → {_netkeiba_id_cache[race_id]}")
-                return _netkeiba_id_cache[race_id]
-        except Exception:
-            logger.warning(f"Failed to load prefetch for {date_str}")
+    if not force_scrape:
+        # Method 1: Check prefetch data (most reliable)
+        prefetch_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'data', 'prefetch', f'races_{date_str}.json',
+        )
+        if os.path.exists(prefetch_path):
+            try:
+                with open(prefetch_path, 'r', encoding='utf-8') as f:
+                    prefetch_data = json.load(f)
+                for r in prefetch_data.get("races", []):
+                    rid = r.get("race_id", "")
+                    nk_id = r.get("race_id_netkeiba", "")
+                    if rid and nk_id and _is_valid_netkeiba_id(nk_id, date_str, race_type):
+                        _netkeiba_id_cache[rid] = nk_id
+                if race_id in _netkeiba_id_cache:
+                    logger.info(f"Resolved via prefetch: {race_id} → {_netkeiba_id_cache[race_id]}")
+                    return _netkeiba_id_cache[race_id]
+            except Exception:
+                logger.warning(f"Failed to load prefetch for {date_str}")
 
     # Method 2: Scraper fallback
     is_nar = any(v in venue for v in NAR_VENUES)
@@ -903,7 +918,16 @@ def _get_realtime_odds(params: dict) -> str:
                 result["track_condition"] = rt["track_condition"]
             return json.dumps(result, ensure_ascii=False)
 
-    odds_map = fetch_realtime_odds(scrape_id, race_type)
+    odds_map = None
+    if "-" not in race_id or scrape_id != race_id:
+        odds_map = fetch_realtime_odds(scrape_id, race_type)
+
+    if not odds_map and "-" in race_id:
+        fallback_id = _resolve_netkeiba_race_id(race_id, race_type, force_scrape=True)
+        if fallback_id and fallback_id != scrape_id:
+            odds_map = fetch_realtime_odds(fallback_id, race_type)
+            if odds_map:
+                scrape_id = fallback_id
 
     # Also scrape track_condition from the same page
     track_condition = _scrape_track_condition(scrape_id, race_type)

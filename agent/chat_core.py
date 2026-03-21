@@ -135,9 +135,25 @@ _RACE_HINT_RE = re.compile(
     re.IGNORECASE,
 )
 
+_OPINION_RE = re.compile(r"(お前は)?どう思う|見解|意見")
+_OPINION_REFUSAL_PHRASES = (
+    "データを見ないと", "情報がない", "わからない", "分からない",
+    "判断できない", "難しい", "予想できない",
+)
+
 
 def _has_explicit_race_hint(message: str) -> bool:
     return bool(_RACE_HINT_RE.search(message))
+
+
+def _is_opinion_query(message: str) -> bool:
+    return bool(_OPINION_RE.search(message))
+
+
+def _should_fallback_opinion(text: str) -> bool:
+    if not text:
+        return True
+    return any(p in text for p in _OPINION_REFUSAL_PHRASES)
 
 
 def run_agent(
@@ -355,6 +371,19 @@ def run_agent(
         if not response_text:
             response_text = "ごめん、うまく答えられなかった。もう一回聞いてもらえる？"
         footer = format_tools_used_footer(tools_used)
+
+    # Opinion guard: if Claude refuses, fall back to deterministic template
+    if not cache_used and _is_opinion_query(user_message) and _should_fallback_opinion(response_text):
+        fallback = route_and_respond("opinion", {}, None, history, profile, active_race_id_hint=active_race_id)
+        if fallback:
+            if history and history[-1].get("role") == "assistant":
+                history.pop()
+            for entry in fallback.get("history_entries", []):
+                history.append(entry)
+            response_text = fallback["text"]
+            footer = fallback.get("footer", "")
+            tools_used = fallback.get("tools_used", [])
+            active_race_id = fallback.get("active_race_id", active_race_id)
 
     full_text = response_text + ("\n\n" + footer if footer else "")
 
