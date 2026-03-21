@@ -907,7 +907,8 @@ def handle_message(event: MessageEvent):
         _set_active_race(user_id, resolved_race)
 
     # Ask for race if missing context
-    if not _get_active_race(user_id) and _needs_race_prompt(user_text):
+    # 「メインレース」はClaude APIに渡して判断させる
+    if not _get_active_race(user_id) and _needs_race_prompt(user_text) and "メインレース" not in user_text:
         _reply(
             event.reply_token,
             "どのレースの話だ？\n\n例: 中山11R / 阪神10レース / 20260319-中山-11",
@@ -999,9 +1000,6 @@ def handle_message(event: MessageEvent):
             elif chunk_type == "done":
                 if pending_notice_timer and pending_notice_timer.is_alive():
                     pending_notice_timer.cancel()
-                if not replied:
-                    _reply(event.reply_token, "了解👍")
-                    replied = True
 
                 full_text = chunk["text"]
                 tools_used = chunk.get("tools_used", [])
@@ -1034,7 +1032,12 @@ def handle_message(event: MessageEvent):
                             )
                             qr = honmei_qr
 
-                _push(user_id, full_text, quick_reply=qr)
+                if not replied:
+                    # Cache hit等で即完了 — reply tokenで直接返す（Quick Reply確実）
+                    _reply(event.reply_token, full_text, quick_reply=qr)
+                    replied = True
+                else:
+                    _push(user_id, full_text, quick_reply=qr)
 
     except Exception as e:
         if pending_notice_timer and pending_notice_timer.is_alive():
