@@ -27,6 +27,7 @@ from flask import Blueprint, request, jsonify, Response
 
 from api.auth import verify_auth_header
 from agent.chat_core import get_mybot_web_quick_replies
+from agent.response_cache import find_race_id
 from db.encryption import encrypt_value, decrypt_value
 from db.supabase_client import get_client
 from db.redis_client import get_redis
@@ -87,9 +88,17 @@ _SAME_RACE_KEYWORDS = [
     "どう思う", "全部", "掘り下げ",
 ]
 
+_OPINION_KEYWORDS = [
+    "どう思う", "見解", "意見",
+]
+
 
 def _is_same_race_query(text: str) -> bool:
     return any(kw in text for kw in _SAME_RACE_KEYWORDS)
+
+
+def _is_opinion_query(text: str) -> bool:
+    return any(kw in text for kw in _OPINION_KEYWORDS)
 
 
 def _needs_race_prompt(text: str) -> bool:
@@ -1232,6 +1241,17 @@ def mybot_chat():
             save_session(auth_key, session)
 
     session = load_session(auth_key)
+    if session and not session.get("active_race_id") and _is_opinion_query(message):
+        restored_race = find_race_id(session.get("history", []))
+        if restored_race:
+            session["active_race_id"] = restored_race
+            save_session(auth_key, session)
+        else:
+            return _sse_text_response(
+                "どのレースの話だ？\n\n例: 中山11R / 阪神10レース / 20260319-中山-11",
+                session_id,
+            )
+
     if session and not session.get("active_race_id") and _needs_race_prompt(message):
         return _sse_text_response(
             "どのレースの話だ？\n\n例: 中山11R / 阪神10レース / 20260319-中山-11",

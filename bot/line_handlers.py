@@ -252,6 +252,10 @@ _SAME_RACE_KEYWORDS = [
     "どう思う", "全部", "掘り下げ",
 ]
 
+_OPINION_KEYWORDS = [
+    "どう思う", "見解", "意見",
+]
+
 
 def _is_race_change(text: str) -> bool:
     """Check if user message indicates moving to a different race."""
@@ -270,6 +274,10 @@ def _is_same_race_query(text: str) -> bool:
         if kw in text:
             return True
     return False
+
+
+def _is_opinion_query(text: str) -> bool:
+    return any(kw in text for kw in _OPINION_KEYWORDS)
 
 
 def _needs_race_prompt(text: str) -> bool:
@@ -905,6 +913,19 @@ def handle_message(event: MessageEvent):
     resolved_race = resolve_race_id_from_text(user_text)
     if resolved_race:
         _set_active_race(user_id, resolved_race)
+
+    # Opinion query without active race: try to restore last viewed race
+    if not _get_active_race(user_id) and _is_opinion_query(user_text):
+        history = _load_history(user_id)
+        restored_race = find_race_id(history)
+        if restored_race:
+            _set_active_race(user_id, restored_race)
+        else:
+            _reply(
+                event.reply_token,
+                "どのレースの話だ？\n\n例: 中山11R / 阪神10レース / 20260319-中山-11",
+            )
+            return
 
     # Ask for race if missing context
     # 「メインレース」はClaude APIに渡して判断させる

@@ -30,8 +30,14 @@ _ROUTES: list[tuple[re.Pattern, str, dict]] = [
     # Race lists
     (re.compile(r"(今日の|きょうの)?(JRA|jra|中央)"), "today_races", {"race_type": "jra"}),
     (re.compile(r"(今日の|きょうの)?(地方|NAR|nar|地方競馬)"), "today_races", {"race_type": "nar"}),
+    # Entries (出馬表)
+    (re.compile(r"メインレース.*(出馬表|エントリ|エントリー)"), "entries", {"main_race": True}),
+    (re.compile(r"出馬表(を|見せて|は|出して)?"), "entries", {}),
     # Predictions
     (re.compile(r"予想(して|を|出|見)"), "predictions", {}),
+    # Opinion
+    (re.compile(r"(お前は)?どう思う[？?]?$"), "opinion", {}),
+    (re.compile(r"(見解|意見)(を|は|聞かせて|ちょうだい|くれ)?"), "opinion", {}),
     # Analysis tools
     (re.compile(r"展開(は|予想|を)?[？?]?$"), "race_flow", {}),
     (re.compile(r"(どんな|どういう)(レース|展開)"), "race_flow", {}),
@@ -158,6 +164,141 @@ def _fmt_predictions(data: dict) -> str:
         lines.append("")
 
     return "\n".join(lines).strip()
+
+
+def _fmt_opinion(entries: dict, predictions: dict, race_flow: dict, odds: dict) -> str:
+    """Format a deterministic 'opinion' response.
+
+    NOTE: Must always provide an opinion (no '分からない').
+    """
+
+    def _safe_float(v):
+        try:
+            return float(v)
+        except Exception:
+            return None
+
+    race_name = entries.get("race_name", "") if isinstance(entries, dict) else ""
+    venue = entries.get("venue", "") if isinstance(entries, dict) else ""
+    distance = entries.get("distance", "") if isinstance(entries, dict) else ""
+    cond = entries.get("track_condition", "") if isinstance(entries, dict) else ""
+
+    lines = ["━━ 俺の見解 ━━"]
+    header_parts = [p for p in [venue, race_name] if p]
+    meta_parts = [p for p in [distance, cond] if p]
+    if header_parts:
+        lines.append(" ".join(header_parts))
+    if meta_parts:
+        lines.append(" / ".join(meta_parts))
+    lines.append("─────────")
+
+    # Map horse_number -> horse_name
+    name_map: dict[int, str] = {}
+    for e in (entries.get("entries", []) if isinstance(entries, dict) else []):
+        try:
+            num = int(e.get("horse_number"))
+            name_map[num] = e.get("horse_name", "")
+        except Exception:
+            continue
+
+    pred_map = (predictions.get("predictions") if isinstance(predictions, dict) else {}) or {}
+    score: dict[int, float] = {}
+    top2_count: dict[int, int] = {}
+
+    for engine, items in pred_map.items():
+        if not isinstance(items, list):
+            continue
+        for it in items[:5]:
+            try:
+                num = int(it.get("horse_number"))
+            except Exception:
+                continue
+            rank = it.get("rank") or 5
+            try:
+                rank = int(rank)
+            except Exception:
+                rank = 5
+            # Rank weight: 1->5, 2->4, ... 5->1
+            score[num] = score.get(num, 0.0) + max(1, 6 - rank)
+            if rank <= 2:
+                top2_count[num] = top2_count.get(num, 0) + 1
+
+    odds_map = (odds.get("odds") if isinstance(odds, dict) else {}) or {}
+    odds_f: dict[int, float] = {}
+    for k, v in odds_map.items():
+        try:
+            num = int(k)
+        except Exception:
+            continue
+        fv = _safe_float(v)
+        if fv is not None:
+            odds_f[num] = fv
+
+    # Pick main candidates
+    ranked = sorted(score.items(), key=lambda kv: (-kv[1], odds_f.get(kv[0], 9999.0)))
+    top_nums = [n for n, _ in ranked[:3]]
+    if not top_nums and odds_f:
+        # Fallback: by odds
+        top_nums = [n for n, _ in sorted(odds_f.items(), key=lambda kv: kv[1])[:3]]
+
+    def _fmt_horse(n: int) -> str:
+        name = name_map.get(n) or "?"
+        o = odds_f.get(n)
+        o_str = f"（現時点{o:.1f}倍）" if o is not None else ""
+        return f"{n}.{name}{o_str}"
+
+    if top_nums:
+        honmei = top_nums[0]
+        others = top_nums[1:]
+        lines.append(f"結論: 俺は { _fmt_horse(honmei) } 寄り")
+        if others:
+            lines.append("相手: " + " / ".join(_fmt_horse(x) for x in others))
+    else:
+        lines.append("結論: ここはまだ割れ気味だな。俺は人気どころ中心で様子見。")
+
+    # Reasons
+    lines.append("")
+    lines.append("根拠:")
+
+    if top_nums:
+        c = top2_count.get(top_nums[0], 0)
+        if c >= 2:
+            lines.append(f"- エンジン上位一致: {top_nums[0]}番は複数エンジンで上位")
+        else:
+            lines.append(f"- エンジン総合: 上位に出てる回数が多いのは {top_nums[0]}番")
+
+    # Pace (best-effort)
+    pace = None
+    if isinstance(race_flow, dict):
+        for key in ("pace", "pace_prediction", "predicted_pace", "pace_scenario", "pace_label"):
+            if key in race_flow and race_flow.get(key):
+                pace = race_flow.get(key)
+                break
+        # Try nested
+        if pace is None:
+            for k, v in race_flow.items():
+                if isinstance(k, str) and "pace" in k.lower() and v:
+                    pace = v
+                    break
+    if pace is not None:
+        lines.append(f"- 展開: ペースは『{pace}』寄りって扱い")
+    else:
+        lines.append("- 展開: ペースは極端じゃない前提で見る")
+
+    if odds_f and top_nums:
+        favs = sorted(odds_f.items(), key=lambda kv: kv[1])[:3]
+        fav_str = " / ".join(_fmt_horse(n) for n, _ in favs)
+        lines.append(f"- オッズ: 人気上位は {fav_str}")
+    elif odds_f:
+        favs = sorted(odds_f.items(), key=lambda kv: kv[1])[:3]
+        fav_str = " / ".join(_fmt_horse(n) for n, _ in favs)
+        lines.append(f"- オッズ: 現時点の上位は {fav_str}")
+    else:
+        lines.append("- オッズ: 直近オッズが取れてないから、エンジン寄りで見る")
+
+    lines.append("")
+    lines.append("押し付けはしねー。最終判断はお前が決めろ。")
+    return "\n".join(lines)
 
 
 def _fmt_odds(data: dict) -> str:
@@ -395,10 +536,34 @@ def route_and_respond(
     Or None if route cannot be handled (fall through to Claude).
     """
     from tools.executor import _race_cache
+    from tools.executor import JRA_VENUES, NAR_VENUES
     from agent.response_cache import find_race_id
     from agent.engine import format_tools_used_footer
 
     tool_context = {"user_profile_id": profile["id"]}
+
+    def _build_multi_tool_history(tool_calls: list[tuple[str, dict, str]], final_text: str) -> list[dict]:
+        """Build synthetic history for multiple tools in one turn."""
+        tool_use_blocks = []
+        tool_result_blocks = []
+        for tool_name, tool_input, tool_result in tool_calls:
+            tool_use_id = f"toolu_{uuid.uuid4().hex[:24]}"
+            tool_use_blocks.append({
+                "type": "tool_use",
+                "id": tool_use_id,
+                "name": tool_name,
+                "input": tool_input,
+            })
+            tool_result_blocks.append({
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "content": tool_result,
+            })
+        return [
+            {"role": "assistant", "content": tool_use_blocks},
+            {"role": "user", "content": tool_result_blocks},
+            {"role": "assistant", "content": final_text},
+        ]
 
     def _ensure_entries_cached(race_id: str):
         """Ensure race entries are in _race_cache (may be missing on different worker)."""
@@ -407,6 +572,109 @@ def route_and_respond(
                 execute_tool("get_race_entries", {"race_id": race_id}, context=tool_context)
             except Exception:
                 pass
+
+    def _entries_dict_from_cache(race_id: str) -> dict:
+        """Normalize executor's _race_cache[...]['entries'] into get_race_entries-like dict."""
+        cached = _race_cache.get(race_id, {}).get("entries", {})
+        if not isinstance(cached, dict):
+            return {}
+
+        horses = cached.get("horses", []) or []
+        nums = cached.get("horse_numbers", []) or []
+        jockeys = cached.get("jockeys", []) or []
+        posts = cached.get("posts", []) or []
+        odds = cached.get("odds", []) or []
+
+        entries = []
+        for i in range(max(len(horses), len(nums), len(jockeys), 0)):
+            num = nums[i] if i < len(nums) else i + 1
+            name = horses[i] if i < len(horses) else ""
+            jockey = jockeys[i] if i < len(jockeys) else ""
+            ent = {"horse_number": num, "horse_name": name, "jockey": jockey}
+            if i < len(posts):
+                ent["post"] = posts[i]
+            if i < len(odds) and odds[i]:
+                ent["odds"] = odds[i]
+            entries.append(ent)
+
+        return {
+            "race_id": race_id,
+            "race_name": cached.get("race_name", ""),
+            "venue": cached.get("venue", ""),
+            "distance": cached.get("distance", ""),
+            "race_number": cached.get("race_number", 0),
+            "track_condition": cached.get("track_condition", ""),
+            "entries": entries,
+        }
+
+    def _guess_race_type_from_race_id(race_id: str) -> str:
+        """Best-effort guess of race_type from race_id (YYYYMMDD-venue-num)."""
+        try:
+            m = re.match(r"^\d{8}-(.+?)-\d+$", race_id)
+            venue = m.group(1) if m else ""
+        except Exception:
+            venue = ""
+        if venue and venue in NAR_VENUES:
+            return "nar"
+        if venue and venue in JRA_VENUES:
+            return "jra"
+        return "jra"
+
+    def _pick_main_race_id(race_type: str) -> str | None:
+        """Pick a reasonable 'main race' from today's races.
+
+        Heuristic:
+          - JRA: prefer 11R; NAR: prefer highest race_number
+          - If start_time is available, choose the nearest upcoming
+        """
+        from datetime import datetime, timezone, timedelta
+
+        try:
+            result_str = execute_tool("get_today_races", {"race_type": race_type}, context=tool_context)
+            data = json.loads(result_str)
+        except Exception:
+            return None
+
+        races = data.get("races", []) or []
+        if not races:
+            return None
+
+        nums = [r.get("race_number", 0) for r in races if isinstance(r, dict)]
+        max_num = max(nums) if nums else 0
+        target_num = 11 if race_type == "jra" else (max_num or 12)
+
+        candidates = [r for r in races if r.get("race_number") == target_num] or list(races)
+
+        # Try to choose nearest upcoming by start_time
+        jst = timezone(timedelta(hours=9))
+        now = datetime.now(jst)
+
+        parsed = []
+        for r in candidates:
+            st = (r.get("start_time") or "").strip()
+            if not st:
+                parsed.append((None, r))
+                continue
+            try:
+                hh, mm = st.split(":", 1)
+                dt = now.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
+                parsed.append((dt, r))
+            except Exception:
+                parsed.append((None, r))
+
+        upcoming = [(dt, r) for dt, r in parsed if dt and dt >= now]
+        if upcoming:
+            upcoming.sort(key=lambda x: x[0])
+            return upcoming[0][1].get("race_id")
+
+        # Fallback: earliest time, else highest race_number
+        timed = [(dt, r) for dt, r in parsed if dt]
+        if timed:
+            timed.sort(key=lambda x: x[0])
+            return timed[0][1].get("race_id")
+
+        candidates.sort(key=lambda x: x.get("race_number", 0), reverse=True)
+        return candidates[0].get("race_id")
 
     # ── Route: self_intro (static, $0) ──
     if route_name == "self_intro":
@@ -453,6 +721,62 @@ def route_and_respond(
         )
         return {"text": text, "footer": footer, "tools_used": tools_used, "history_entries": history_entries}
 
+    # ── Route: entries (出馬表) ──
+    if route_name == "entries":
+        main_race = bool(route_params.get("main_race"))
+
+        race_id = active_race_id_hint or find_race_id(history)
+        race_type = _guess_race_type_from_race_id(race_id) if race_id else "jra"
+
+        if main_race:
+            # Prefer the last listed race_type if user just requested race list
+            # (fallback: jra)
+            inferred_type = None
+            for msg in reversed(history):
+                content = msg.get("content")
+                if not isinstance(content, list):
+                    continue
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") == "get_today_races":
+                        inp = block.get("input") or {}
+                        if isinstance(inp, dict) and inp.get("race_type") in ("jra", "nar"):
+                            inferred_type = inp.get("race_type")
+                            break
+                if inferred_type:
+                    break
+
+            race_type = inferred_type or race_type or "jra"
+            race_id = _pick_main_race_id(race_type)
+            if not race_id:
+                return None
+
+        if not race_id:
+            return None
+
+        result_str = execute_tool(
+            "get_race_entries",
+            {"race_id": race_id, "race_type": race_type},
+            context=tool_context,
+        )
+        data = json.loads(result_str)
+        text = _fmt_entries(data)
+
+        tools_used = ["get_race_entries"]
+        footer = format_tools_used_footer(tools_used)
+        history_entries = _build_history_entries(
+            tool_name="get_race_entries",
+            tool_input={"race_id": race_id, "race_type": race_type},
+            tool_result=result_str,
+            final_text=text,
+        )
+        return {
+            "text": text,
+            "footer": footer,
+            "tools_used": tools_used,
+            "history_entries": history_entries,
+            "active_race_id": race_id,
+        }
+
     # ── Route: predictions (needs race_id from history) ──
     if route_name == "predictions":
         race_id = active_race_id_hint or find_race_id(history)
@@ -477,6 +801,80 @@ def route_and_respond(
         )
         return {"text": text, "footer": footer, "tools_used": tools_used,
                 "history_entries": history_entries, "active_race_id": race_id}
+
+    # ── Route: opinion (お前はどう思う？) ──
+    if route_name == "opinion":
+        race_id = active_race_id_hint or find_race_id(history)
+        if not race_id:
+            return None
+
+        cache_entry = _race_cache.get(race_id, {})
+        cached_entries = cache_entry.get("entries", {}) if isinstance(cache_entry, dict) else {}
+        race_type = "jra"
+        if isinstance(cached_entries, dict) and cached_entries.get("race_type") in ("jra", "nar"):
+            race_type = cached_entries.get("race_type")
+        else:
+            race_type = _guess_race_type_from_race_id(race_id)
+
+        tool_calls: list[tuple[str, dict, str]] = []
+
+        # Ensure entries (prefer cache)
+        entries_dict = _entries_dict_from_cache(race_id) if (race_id in _race_cache and cached_entries) else {}
+        if not entries_dict.get("entries"):
+            # Try tool call (and retry with other race_type if needed)
+            for rt in (race_type, "nar" if race_type == "jra" else "jra"):
+                result_str = execute_tool("get_race_entries", {"race_id": race_id, "race_type": rt}, context=tool_context)
+                try:
+                    data = json.loads(result_str)
+                except Exception:
+                    data = {}
+                if isinstance(data, dict) and not data.get("error"):
+                    race_type = rt
+                    entries_dict = data
+                    tool_calls.append(("get_race_entries", {"race_id": race_id, "race_type": rt}, result_str))
+                    break
+
+        # Predictions
+        pred_str = execute_tool("get_predictions", {"race_id": race_id}, context=tool_context)
+        try:
+            pred_data = json.loads(pred_str)
+        except Exception:
+            pred_data = {}
+        tool_calls.append(("get_predictions", {"race_id": race_id}, pred_str))
+
+        # Race flow
+        flow_str = execute_tool("get_race_flow", {"race_id": race_id}, context=tool_context)
+        try:
+            flow_data = json.loads(flow_str)
+        except Exception:
+            flow_data = {}
+        tool_calls.append(("get_race_flow", {"race_id": race_id}, flow_str))
+
+        # Odds
+        odds_data = {}
+        for rt in (race_type, "nar" if race_type == "jra" else "jra"):
+            odds_str = execute_tool("get_realtime_odds", {"race_id": race_id, "race_type": rt}, context=tool_context)
+            try:
+                data = json.loads(odds_str)
+            except Exception:
+                data = {}
+            if isinstance(data, dict) and not data.get("error"):
+                race_type = rt
+                odds_data = data
+                tool_calls.append(("get_realtime_odds", {"race_id": race_id, "race_type": rt}, odds_str))
+                break
+
+        text = _fmt_opinion(entries_dict, pred_data, flow_data, odds_data)
+        tools_used = [t[0] for t in tool_calls]
+        footer = format_tools_used_footer(tools_used)
+        history_entries = _build_multi_tool_history(tool_calls, text)
+        return {
+            "text": text,
+            "footer": footer,
+            "tools_used": tools_used,
+            "history_entries": history_entries,
+            "active_race_id": race_id,
+        }
 
     # ── Route: odds ──
     if route_name == "odds":

@@ -206,9 +206,17 @@ _SAME_RACE_KEYWORDS = [
     "どう思う", "全部", "掘り下げ",
 ]
 
+_OPINION_KEYWORDS = [
+    "どう思う", "見解", "意見",
+]
+
 
 def _is_same_race_query(text: str) -> bool:
     return any(kw in text for kw in _SAME_RACE_KEYWORDS)
+
+
+def _is_opinion_query(text: str) -> bool:
+    return any(kw in text for kw in _OPINION_KEYWORDS)
 
 
 def _needs_race_prompt(text: str) -> bool:
@@ -893,6 +901,19 @@ def handle_mybot_webhook(user_id: str):
             resolved_race = resolve_race_id_from_text(user_text)
             if resolved_race:
                 _set_active_race(user_id, sender_id, resolved_race)
+
+            if not _get_active_race(user_id, sender_id) and _is_opinion_query(user_text):
+                history = _load_history(user_id, sender_id)
+                restored_race = find_race_id(history)
+                if restored_race:
+                    _set_active_race(user_id, sender_id, restored_race)
+                else:
+                    _reply(
+                        access_token,
+                        reply_token,
+                        "どのレースの話だ？\n\n例: 中山11R / 阪神10レース / 20260319-中山-11",
+                    )
+                    continue
 
             if not _get_active_race(user_id, sender_id) and _needs_race_prompt(user_text):
                 _reply(

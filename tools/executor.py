@@ -461,8 +461,24 @@ def _get_today_races(params: dict) -> str:
 
     result = []
     for r in scrape_races:
+        # IMPORTANT: Netkeiba race_id (10-12 digits) doesn't encode race date, which breaks
+        # honmei gating (is_future_or_today_race). Use custom race_id for app logic.
+        custom_race_id = f"{date_str}-{r.venue}-{r.race_number}"
+
+        # Cache custom→netkeiba mapping so other tools can resolve without prefetch.
+        # (Multi-worker safe fallback exists in _resolve_netkeiba_race_id, but this is faster.)
+        try:
+            _netkeiba_id_cache[custom_race_id] = r.race_id
+            if len(_netkeiba_id_cache) > _MAX_NETKEIBA_CACHE_SIZE:
+                # Trim oldest-ish entries (dict insertion order)
+                for k in list(_netkeiba_id_cache.keys())[:50]:
+                    _netkeiba_id_cache.pop(k, None)
+        except Exception:
+            pass
+
         result.append({
-            "race_id": r.race_id,
+            "race_id": custom_race_id,
+            "race_id_netkeiba": r.race_id,
             "race_number": r.race_number,
             "race_name": r.race_name,
             "venue": r.venue,
@@ -470,6 +486,7 @@ def _get_today_races(params: dict) -> str:
             "headcount": r.headcount,
             "start_time": r.start_time,
             "has_predictions": False,
+            "race_date": f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}",
         })
 
     return json.dumps({
@@ -615,10 +632,12 @@ def _get_race_entries(params: dict) -> str:
                 logger.error(f"Archive entries invalid for {race_id}, falling through to scraping")
 
     # Step 2: Fallback to scraping
+    # NOTE: support custom race_id (YYYYMMDD-venue-num) by resolving it to netkeiba race_id.
+    scrape_id = _resolve_netkeiba_race_id(race_id, race_type)
     if race_type == "jra":
-        detail = jra.fetch_race_entries(race_id)
+        detail = jra.fetch_race_entries(scrape_id)
     else:
-        detail = nar.fetch_race_entries(race_id)
+        detail = nar.fetch_race_entries(scrape_id)
 
     if not detail:
         return json.dumps({"error": f"レース情報の取得に失敗しました: {race_id}"}, ensure_ascii=False)
@@ -654,6 +673,10 @@ def _get_race_entries(params: dict) -> str:
         "headcount": detail.summary.headcount,
         "entries": entries,
     }
+    # Keep race_date when race_id is custom format
+    date_str = _extract_race_date_from_id(race_id)
+    if date_str:
+        result["race_date"] = date_str
     _cache_race_data(race_id, entries, result)
     return json.dumps(result, ensure_ascii=False)
 
