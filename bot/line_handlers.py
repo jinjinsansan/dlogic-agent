@@ -326,6 +326,7 @@ def get_quick_reply(tools_used: list[str]) -> QuickReply | None:
         "get_jockey_analysis", "get_bloodline_analysis", "get_recent_runs",
         "get_stable_comments", "get_realtime_odds", "get_odds_probability",
         "get_horse_weights", "get_training_comments", "get_honmei_ratio",
+        "get_odds_signals",
     }
 
     items = []
@@ -350,6 +351,8 @@ def get_quick_reply(tools_used: list[str]) -> QuickReply | None:
             items.append(QuickReplyItem(action=MessageAction(label="💰 オッズは？", text="オッズ見せて")))
         if "get_horse_weights" not in used_set:
             items.append(QuickReplyItem(action=MessageAction(label="⚖️ 馬体重", text="馬体重は？")))
+        if "get_odds_signals" not in used_set:
+            items.append(QuickReplyItem(action=MessageAction(label="📉 歪みは？", text="歪みは？")))
         items.append(QuickReplyItem(action=MessageAction(label="🗳️ みんなの本命", text="みんなの本命比率")))
         items.append(QuickReplyItem(action=MessageAction(label="💬 どう思う？", text="お前はどう思う？")))
 

@@ -45,6 +45,7 @@ def get_web_quick_replies(tools_used: list[str]) -> list[dict]:
         "get_jockey_analysis", "get_bloodline_analysis", "get_recent_runs",
         "get_stable_comments", "get_realtime_odds", "get_odds_probability",
         "get_horse_weights", "get_training_comments", "get_honmei_ratio",
+        "get_odds_signals",
     }
 
     if used_set & race_tools:
@@ -67,6 +68,8 @@ def get_web_quick_replies(tools_used: list[str]) -> list[dict]:
             items.append({"label": "💰 オッズは？", "text": "オッズ見せて", "query_type": "odds"})
         if "get_horse_weights" not in used_set:
             items.append({"label": "⚖️ 馬体重", "text": "馬体重は？", "query_type": "weights"})
+        if "get_odds_signals" not in used_set:
+            items.append({"label": "📉 歪みは？", "text": "歪みは？"})
         items.append({"label": "🗳️ みんなの本命", "text": "みんなの本命比率", "query_type": "honmei_ratio"})
         items.append({"label": "💬 どう思う？", "text": "お前はどう思う？"})
 
@@ -87,6 +90,7 @@ def get_mybot_web_quick_replies(tools_used: list[str]) -> list[dict]:
         "get_predictions", "get_race_entries",
         "get_odds_probability", "get_realtime_odds", "get_horse_weights",
         "get_stable_comments", "get_training_comments", "get_honmei_ratio",
+        "get_odds_signals",
     }
 
     items = []
@@ -103,6 +107,8 @@ def get_mybot_web_quick_replies(tools_used: list[str]) -> list[dict]:
             items.append({"label": "⚖️ 馬体重", "text": "馬体重は？", "query_type": "weights"})
         if "get_stable_comments" not in used_set:
             items.append({"label": "🗣️ 関係者情報", "text": "関係者情報は？", "query_type": "stable_comments"})
+        if "get_odds_signals" not in used_set:
+            items.append({"label": "📉 歪みは？", "text": "歪みは？"})
         items.append({"label": "🗳️ みんなの本命", "text": "みんなの本命比率", "query_type": "honmei_ratio"})
         items.append({"label": "💬 どう思う？", "text": "お前はどう思う？"})
 
@@ -170,6 +176,7 @@ def run_agent(
                 f"\n\n【本命登録済み】レース {active_race_id_hint} の本命は "
                 f"{existing_pick['horse_number']}番 {existing_pick['horse_name']} で登録済み。"
                 f"このレースの本命は再度聞かないこと。"
+                f"ただし、見解・意見・分析など他の質問には必ず答えること。"
             )
 
     # Inject active race context so Claude knows which race is being discussed

@@ -53,6 +53,8 @@ _ROUTES: list[tuple[re.Pattern, str, dict]] = [
     (re.compile(r"(陣営|厩舎)(の|コメント|情報|は)"), "stable_comments", {}),
     (re.compile(r"結果(は|を|見)?[？?]?$"), "race_results", {}),
     (re.compile(r"(何着|着順|勝った馬)"), "race_results", {}),
+    # Odds signals (歪み)
+    (re.compile(r"歪み(は|を|見|ある)?[？?]?"), "odds_signal", {}),
     # Stats (no API needed at all)
     (re.compile(r"(俺の|おれの|自分の)?(成績|的中|回収)"), "my_stats", {}),
     # Honmei ratio (みんなの本命比率)
@@ -1067,6 +1069,47 @@ def route_and_respond(
         return {"text": text, "footer": footer, "tools_used": tools_used,
                 "history_entries": history_entries, "active_race_id": race_id}
 
+    # ── Route: odds_signal (歪みは？) ──
+    if route_name == "odds_signal":
+        race_id = active_race_id_hint or find_race_id(history)
+        if not race_id:
+            return None
+
+        _ensure_entries_cached(race_id)
+
+        # Resolve to netkeiba ID for Supabase query
+        from tools.executor import _resolve_netkeiba_race_id
+        netkeiba_id = _resolve_netkeiba_race_id(race_id)
+
+        # Query odds_signals from Supabase (last 3 hours)
+        try:
+            from db.supabase_client import get_client
+            from datetime import datetime, timedelta, timezone
+            sb = get_client()
+            cutoff = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+            res = sb.table("odds_signals") \
+                .select("*") \
+                .eq("race_id", netkeiba_id) \
+                .gte("notified_at", cutoff) \
+                .order("notified_at", desc=True) \
+                .execute()
+            signals = res.data or []
+        except Exception:
+            logger.exception("Failed to fetch odds signals")
+            signals = []
+
+        text = _fmt_odds_signals(signals, race_id)
+        tools_used = ["get_odds_signals"]
+        footer = format_tools_used_footer(tools_used)
+        history_entries = _build_history_entries(
+            tool_name="get_odds_signals",
+            tool_input={"race_id": race_id},
+            tool_result=json.dumps({"count": len(signals)}, ensure_ascii=False),
+            final_text=text,
+        )
+        return {"text": text, "footer": footer, "tools_used": tools_used,
+                "history_entries": history_entries, "active_race_id": race_id}
+
     # ── Analysis routes: fall through to Claude ──
     # race_flow, jockey, bloodline, recent_runs
     # These need Claude to interpret and summarize the data
@@ -1180,6 +1223,101 @@ def _fmt_honmei_ratio(race_id: str) -> str:
         lines.append(f"   {bar} {pct:.0f}%")
 
     lines.append("")
+    lines.append("━━━━━━━━")
+
+    return "\n".join(lines)
+
+
+def _fmt_odds_signals(signals: list[dict], race_id: str) -> str:
+    """Format odds signals for LINE display."""
+    from tools.executor import _race_cache
+
+    # Build horse number → name map from cache
+    horse_map: dict[int, str] = {}
+    cached = _race_cache.get(race_id, {}).get("entries", {})
+    if isinstance(cached, dict):
+        nums = cached.get("horse_numbers", [])
+        names = cached.get("horses", [])
+        for n, name in zip(nums, names):
+            try:
+                horse_map[int(n)] = name
+            except (ValueError, TypeError):
+                pass
+
+    venue = cached.get("venue", "")
+    race_number = cached.get("race_number", "")
+    race_name = cached.get("race_name", "")
+
+    lines = ["━━ オッズ歪みシグナル ━━"]
+    if venue or race_number:
+        lines.append(f"📍 {venue}{race_number}R {race_name}".strip())
+    lines.append("")
+
+    if not signals:
+        lines.append("このレースはまだ歪みシグナルが出てないな。")
+        lines.append("レース前になったらまたチェックしてくれ！")
+        lines.append("")
+        lines.append("━━━━━━━━")
+        return "\n".join(lines)
+
+    # Group by type
+    drops = [s for s in signals if s.get("signal_type") == "drop"]
+    surges = [s for s in signals if s.get("signal_type") == "surge"]
+    reversals = [s for s in signals if s.get("signal_type") == "reversal"]
+
+    if drops:
+        lines.append("📉 急落（大口買い検知）")
+        for s in drops:
+            num = s.get("horse_number", 0)
+            name = horse_map.get(num, s.get("horse_name", f"{num}番"))
+            detail = s.get("detail", {})
+            if isinstance(detail, str):
+                try:
+                    detail = json.loads(detail)
+                except Exception:
+                    detail = {}
+            prev = detail.get("prev_odds", "?")
+            curr = detail.get("curr_odds", "?")
+            pct = detail.get("change_pct", 0)
+            lines.append(f"  {num}. {name}")
+            lines.append(f"     {prev}倍 → {curr}倍（{pct:+.1f}%）")
+        lines.append("")
+
+    if surges:
+        lines.append("📈 急騰（嫌気）")
+        for s in surges:
+            num = s.get("horse_number", 0)
+            name = horse_map.get(num, s.get("horse_name", f"{num}番"))
+            detail = s.get("detail", {})
+            if isinstance(detail, str):
+                try:
+                    detail = json.loads(detail)
+                except Exception:
+                    detail = {}
+            prev = detail.get("prev_odds", "?")
+            curr = detail.get("curr_odds", "?")
+            pct = detail.get("change_pct", 0)
+            lines.append(f"  {num}. {name}")
+            lines.append(f"     {prev}倍 → {curr}倍（{pct:+.1f}%）")
+        lines.append("")
+
+    if reversals:
+        lines.append("🔀 人気逆転")
+        for s in reversals:
+            detail = s.get("detail", {})
+            if isinstance(detail, str):
+                try:
+                    detail = json.loads(detail)
+                except Exception:
+                    detail = {}
+            old_num = detail.get("old_favorite", "?")
+            new_num = detail.get("new_favorite", "?")
+            old_name = horse_map.get(old_num, f"{old_num}番")
+            new_name = horse_map.get(new_num, f"{new_num}番")
+            lines.append(f"  {old_num}.{old_name} → {new_num}.{new_name} が1番人気に")
+        lines.append("")
+
+    lines.append(f"検知数: 📉{len(drops)} 📈{len(surges)} 🔀{len(reversals)}")
     lines.append("━━━━━━━━")
 
     return "\n".join(lines)
