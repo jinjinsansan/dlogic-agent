@@ -35,9 +35,6 @@ _ROUTES: list[tuple[re.Pattern, str, dict]] = [
     (re.compile(r"出馬表(を|見せて|は|出して)?"), "entries", {}),
     # Predictions
     (re.compile(r"予想(して|を|出|見)"), "predictions", {}),
-    # Opinion
-    (re.compile(r"(お前は)?どう思う[？?]?$"), "opinion", {}),
-    (re.compile(r"(見解|意見)(を|は|聞かせて|ちょうだい|くれ)?"), "opinion", {}),
     # Analysis tools
     (re.compile(r"展開(は|予想|を)?[？?]?$"), "race_flow", {}),
     (re.compile(r"(どんな|どういう)(レース|展開)"), "race_flow", {}),
@@ -83,6 +80,16 @@ def _fmt_race_list(data: dict) -> str:
     races = data.get("races", [])
     if not races:
         return "今日はレースがないみたいだな。"
+
+    deduped = []
+    seen = set()
+    for r in races:
+        key = r.get("race_id") or f"{r.get('venue', '')}-{r.get('race_number', 0)}"
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(r)
+    races = deduped
 
     # Group by venue
     venues: dict[str, list] = {}

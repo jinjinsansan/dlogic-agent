@@ -137,13 +137,12 @@ def resolve_race_id_from_text(text: str) -> str | None:
         return netkeiba.group(0)
 
     match = _RACE_NUMBER_RE.search(text)
-    if not match:
-        return None
-
-    try:
-        race_number = int(match.group(1))
-    except ValueError:
-        return None
+    race_number = None
+    if match:
+        try:
+            race_number = int(match.group(1))
+        except ValueError:
+            race_number = None
 
     venue = ""
     for v in _ALL_VENUES:
@@ -175,8 +174,24 @@ def resolve_race_id_from_text(text: str) -> str | None:
                 continue
             candidates.append(race)
 
-    if len(candidates) == 1:
+    if race_number is not None and len(candidates) == 1:
         return candidates[0].get("race_id")
+
+    # Fallback: match by race name (e.g., "阪神大賞典")
+    name_candidates: list[dict] = []
+    for race_type in race_types:
+        for race in _load_today(race_type):
+            race_name = race.get("race_name", "")
+            if not race_name:
+                continue
+            if venue and venue not in race.get("venue", ""):
+                continue
+            if race_name in text or text in race_name:
+                name_candidates.append(race)
+
+    if len(name_candidates) == 1:
+        return name_candidates[0].get("race_id")
+
     return None
 
 
@@ -387,6 +402,17 @@ def _get_today_races(params: dict) -> str:
     venue_filter = params.get("venue", "")
     is_local = race_type == "nar"
 
+    def _dedupe_races(items: list[dict]) -> list[dict]:
+        seen = set()
+        deduped = []
+        for r in items:
+            key = r.get("race_id") or f"{r.get('venue', '')}-{r.get('race_number', 0)}"
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(r)
+        return deduped
+
     # Step 0: Try prefetched JSON (fastest path)
     prefetch = _load_prefetch(date_str)
     if prefetch:
@@ -416,6 +442,7 @@ def _get_today_races(params: dict) -> str:
                 if r.get('start_time'):
                     race_entry["start_time"] = r['start_time']
                 result.append(race_entry)
+            result = _dedupe_races(result)
             return json.dumps({
                 "races": result,
                 "count": len(result),
@@ -438,6 +465,7 @@ def _get_today_races(params: dict) -> str:
                 "track_condition": r.track_condition,
                 "has_predictions": bool(r.predictions),
             })
+        result = _dedupe_races(result)
         return json.dumps({
             "races": result,
             "count": len(result),
@@ -488,6 +516,8 @@ def _get_today_races(params: dict) -> str:
             "has_predictions": False,
             "race_date": f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}",
         })
+
+    result = _dedupe_races(result)
 
     return json.dumps({
         "races": result,
@@ -610,6 +640,7 @@ def _get_race_entries(params: dict) -> str:
                     "headcount": len(arch.horses),
                     "entries": entries,
                     "race_date": arch.race_date,
+                    "odds": arch.odds or [],
                 }
 
                 if arch.predictions:
@@ -902,6 +933,31 @@ def _get_realtime_odds(params: dict) -> str:
                 if rt.get("track_condition"):
                     result["track_condition"] = rt["track_condition"]
                 return json.dumps(result, ensure_ascii=False)
+
+        # Fallback to cached entry odds (prefetch/archive)
+        if race_id in _race_cache and "entries" in _race_cache[race_id]:
+            cached_entries = _race_cache[race_id]["entries"]
+            cached_odds = cached_entries.get("odds", [])
+            cached_nums = cached_entries.get("horse_numbers", [])
+            if cached_odds and any(o > 0 for o in cached_odds):
+                odds_map = {}
+                for i, num in enumerate(cached_nums):
+                    if i < len(cached_odds) and cached_odds[i] > 0:
+                        try:
+                            key = int(num)
+                        except (TypeError, ValueError):
+                            continue
+                        odds_map[key] = cached_odds[i]
+                if odds_map:
+                    sorted_odds = dict(sorted(odds_map.items()))
+                    result = {
+                        "race_id": race_id,
+                        "odds": {str(k): v for k, v in sorted_odds.items()},
+                        "prefetch": True,
+                    }
+                    if track_condition:
+                        result["track_condition"] = track_condition
+                    return json.dumps(result, ensure_ascii=False)
 
         result = {"race_id": race_id, "odds": {}}
         if track_condition:
@@ -1451,6 +1507,9 @@ def _get_odds_probability(params: dict) -> str:
         cached = _race_cache[race_id]["entries"]
         horses = cached.get("horses", [])
         horse_numbers = cached.get("horse_numbers", [])
+        cached_odds = cached.get("odds", [])
+        if cached_odds:
+            odds_list = cached_odds
 
     # Try realtime odds from cache
     if race_id in _race_cache and "realtime" in _race_cache[race_id]:
