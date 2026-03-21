@@ -267,8 +267,14 @@ def save_settings():
     if err:
         return jsonify({"error": err}), 400
 
-    # Validate bot_name
-    bot_name = data.get("bot_name", "MYBOT").strip()
+    # Validate bot_name — default to "{display_name}のMYBOT"
+    default_name = "MYBOT"
+    user_display = payload.get("name", "")
+    if user_display and user_display not in ("Webユーザー", "匿名ユーザー"):
+        candidate = f"{user_display}のMYBOT"
+        if len(candidate) <= 20:
+            default_name = candidate
+    bot_name = data.get("bot_name", default_name).strip()
     if not bot_name or len(bot_name) > 20:
         return jsonify({"error": "bot_name must be 1-20 characters"}), 400
 
@@ -293,7 +299,7 @@ def save_settings():
         "horse_weight": data.get("horse_weight", 70),
         "jockey_weight": data.get("jockey_weight", 30),
         "item_weights": data.get("item_weights", DEFAULT_ITEM_WEIGHTS),
-        "is_public": data.get("is_public", False),
+        "is_public": data.get("is_public", True),
         "prediction_style": data.get("prediction_style", "balanced"),
         "analysis_depth": data.get("analysis_depth", "standard"),
         "bet_suggestion": data.get("bet_suggestion", "basic"),
