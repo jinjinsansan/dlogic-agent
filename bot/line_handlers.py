@@ -1037,6 +1037,11 @@ def handle_message(event: MessageEvent):
                             )
                             qr = honmei_qr
 
+                # Fallback: even if tools_used is empty/invalid (e.g., cached text),
+                # keep analysis quick replies visible as long as we have an active race.
+                if qr is None and (active_race_id or _get_active_race(user_id)):
+                    qr = get_quick_reply(["get_race_entries"])
+
                 if not replied:
                     # Cache hit等で即完了 — reply tokenで直接返す（Quick Reply確実）
                     _reply(event.reply_token, full_text, quick_reply=qr)
