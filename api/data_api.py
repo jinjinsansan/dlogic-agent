@@ -6,7 +6,8 @@ import json
 import logging
 from flask import Blueprint, request, jsonify
 
-from tools.executor import _get_today_races, _get_race_entries
+from tools.executor import _get_today_races, _get_race_entries, _resolve_netkeiba_race_id
+from scrapers.odds import fetch_realtime_odds
 
 logger = logging.getLogger(__name__)
 
@@ -69,3 +70,28 @@ def get_entries(race_id: str):
     except Exception as e:
         logger.error(f"Data API /entries error: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/odds/<race_id>", methods=["GET"])
+def get_odds(race_id: str):
+    """
+    リアルタイムオッズを取得（Lightpanda経由）
+
+    Path params:
+        race_id: custom or netkeiba race ID
+
+    Query params:
+        type: jra or nar (default: jra)
+
+    Returns:
+        { race_id, odds: {horse_number: odds_value, ...} }
+    """
+    race_type = request.args.get("type", "jra")
+
+    try:
+        netkeiba_id = _resolve_netkeiba_race_id(race_id, race_type)
+        odds = fetch_realtime_odds(netkeiba_id, race_type)
+        return jsonify({"race_id": race_id, "odds": odds or {}})
+    except Exception as e:
+        logger.error(f"Data API /odds error: {e}")
+        return jsonify({"error": str(e), "odds": {}}), 500
