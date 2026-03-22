@@ -1111,7 +1111,8 @@ def route_and_respond(
             from db.supabase_client import get_client
             from datetime import datetime, timedelta, timezone
             sb = get_client()
-            cutoff = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+            # Show all signals from today (UTC midnight = JST 9:00 previous day, safe enough)
+            cutoff = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
             res = sb.table("odds_signals") \
                 .select("*") \
                 .eq("race_id", netkeiba_id) \
