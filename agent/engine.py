@@ -8,7 +8,7 @@ import anthropic
 
 from config import (
     ANTHROPIC_API_KEY, CLAUDE_MODEL, SYSTEM_PROMPT, MAX_TOKENS,
-    LLM_PROVIDER,
+    LLM_PROVIDER, MAX_HISTORY_TURNS, TOOL_RESULT_MAX_LEN, TOOL_RESULT_KEEP_RECENT,
 )
 from tools.definitions import TOOLS
 
@@ -444,7 +444,7 @@ def extract_memories(user_message: str, assistant_response: str) -> list[str]:
         return []
 
 
-def _compress_tool_result(content: str, max_len: int = 800) -> str:
+def _compress_tool_result(content: str, max_len: int = TOOL_RESULT_MAX_LEN) -> str:
     """Compress a tool_result string to save tokens on subsequent API calls.
 
     Keeps the first max_len characters and appends a truncation notice.
@@ -458,7 +458,7 @@ def _compress_tool_result(content: str, max_len: int = 800) -> str:
     return truncated + "\n...[データ省略]"
 
 
-def _compress_old_tool_results(history: list[dict], keep_recent: int = 4) -> list[dict]:
+def _compress_old_tool_results(history: list[dict], keep_recent: int = TOOL_RESULT_KEEP_RECENT) -> list[dict]:
     """Compress tool_result content in older messages to reduce input tokens.
 
     Keeps the most recent `keep_recent` messages untouched.
@@ -511,7 +511,7 @@ def _compress_old_tool_results(history: list[dict], keep_recent: int = 4) -> lis
     return compressed
 
 
-def trim_history(conversation_history: list[dict], max_turns: int = 10) -> list[dict]:
+def trim_history(conversation_history: list[dict], max_turns: int = MAX_HISTORY_TURNS) -> list[dict]:
     """Trim conversation history to keep only the last N turns to manage context size.
 
     Ensures we never split tool_use/tool_result pairs, which would cause

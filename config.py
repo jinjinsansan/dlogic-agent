@@ -41,8 +41,12 @@ MAX_RETRIES = 3
 
 # Agent
 MAX_TOOL_TURNS = 4
-MAX_TOKENS = int(os.getenv("MAX_TOKENS", "2000"))
-MEMORY_EXTRACT_SAMPLE_RATE = float(os.getenv("MEMORY_EXTRACT_SAMPLE_RATE", "0.1"))
+MAX_TOKENS = int(os.getenv("MAX_TOKENS", "1200"))
+MAX_HISTORY_TURNS = int(os.getenv("MAX_HISTORY_TURNS", "6"))
+TOOL_RESULT_MAX_LEN = int(os.getenv("TOOL_RESULT_MAX_LEN", "400"))
+TOOL_RESULT_KEEP_RECENT = int(os.getenv("TOOL_RESULT_KEEP_RECENT", "2"))
+MYBOT_HISTORY_MAX = int(os.getenv("MYBOT_HISTORY_MAX", "12"))
+MEMORY_EXTRACT_SAMPLE_RATE = float(os.getenv("MEMORY_EXTRACT_SAMPLE_RATE", "0.05"))
 
 SYSTEM_PROMPT = """あなたは「ディーロジ」。競馬予想の相棒。タメ口で話す（です/ます禁止）。
 データと分析で判断材料を提供し、最後の決断はご主人様に委ねる。

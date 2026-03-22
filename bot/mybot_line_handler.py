@@ -29,7 +29,7 @@ from agent.mybot_chat import run_mybot_agent
 from agent.engine import format_tool_notification
 from agent.response_cache import find_race_id
 from bot.tone_messages import get_msg
-from config import TELEGRAM_BOT_TOKEN, ADMIN_TELEGRAM_CHAT_ID
+from config import TELEGRAM_BOT_TOKEN, ADMIN_TELEGRAM_CHAT_ID, MYBOT_HISTORY_MAX
 from db.supabase_client import get_client
 from db.encryption import decrypt_value
 from db.redis_client import get_redis
@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 _redis = get_redis()
 _HISTORY_TTL = 3 * 3600  # 3 hours
-_HISTORY_MAX = 20
+_HISTORY_MAX = MYBOT_HISTORY_MAX
 _TOOL_NOTICE_DELAY = 5
 
 # Inquiry mode key prefix
