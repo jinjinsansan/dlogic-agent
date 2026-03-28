@@ -210,6 +210,8 @@ def judge_predictions(race_id: str) -> dict:
 def update_user_stats_for_race(race_id: str) -> int:
     """Update user_stats for all users who predicted on this race.
 
+    Idempotent: rebuilds each user's stats from actual data every time.
+    Safe to call multiple times for the same race.
     Returns number of users updated.
     """
     judgement = judge_predictions(race_id)
@@ -217,20 +219,16 @@ def update_user_stats_for_race(race_id: str) -> int:
         logger.warning(f"Cannot update stats for {race_id}: {judgement['error']}")
         return 0
 
-    sb = get_client()
-    win_payout = judgement["win_payout"]
-    updated = 0
-
-    # Process winners
+    # Collect unique user IDs from winners + losers
+    user_ids = set()
     for w in judgement["winners"]:
-        uid = w["user_profile_id"]
-        _upsert_stats(sb, uid, is_win=True, payout=win_payout)
-        updated += 1
-
-    # Process losers
+        user_ids.add(w["user_profile_id"])
     for l in judgement["losers"]:
-        uid = l["user_profile_id"]
-        _upsert_stats(sb, uid, is_win=False, payout=0)
+        user_ids.add(l["user_profile_id"])
+
+    updated = 0
+    for uid in user_ids:
+        _rebuild_user_stats(uid)
         updated += 1
 
     logger.info(f"Updated stats for {updated} users on race {race_id}")
@@ -357,54 +355,92 @@ def get_ranking(limit: int = 20) -> list[dict]:
     return ranking
 
 
-def _upsert_stats(sb, user_profile_id: str, is_win: bool, payout: int):
-    """Insert or update a user's stats row."""
-    # Get current stats
-    res = sb.table("user_stats") \
-        .select("*") \
-        .eq("user_profile_id", user_profile_id) \
-        .limit(1) \
-        .execute()
+def _rebuild_user_stats(user_profile_id: str):
+    """Rebuild a single user's stats from user_predictions + race_results.
 
+    Idempotent: always produces the same result regardless of how many times called.
+    """
+    sb = get_client()
     now = datetime.now(JST).isoformat()
 
-    if res.data:
-        # Update existing
-        stats = res.data[0]
-        total_picks = stats["total_picks"] + 1
-        total_wins = stats["total_wins"] + (1 if is_win else 0)
-        total_payout = stats["total_payout"] + payout
-        total_bet = stats["total_bet"] + 100  # 仮想100円BET
-        recovery_rate = (total_payout / total_bet * 100) if total_bet > 0 else 0
-        win_rate = (total_wins / total_picks * 100) if total_picks > 0 else 0
-        current_streak = (stats["current_streak"] + 1) if is_win else 0
-        best_payout = max(stats["best_payout"], payout)
+    # Get all predictions for this user
+    preds = sb.table("user_predictions") \
+        .select("race_id, horse_number") \
+        .eq("user_profile_id", user_profile_id) \
+        .execute()
 
-        sb.table("user_stats") \
-            .update({
-                "total_picks": total_picks,
-                "total_wins": total_wins,
-                "total_payout": total_payout,
-                "total_bet": total_bet,
-                "recovery_rate": round(recovery_rate, 1),
-                "win_rate": round(win_rate, 1),
-                "current_streak": current_streak,
-                "best_payout": best_payout,
-                "last_updated_at": now,
-            }) \
-            .eq("user_profile_id", user_profile_id) \
-            .execute()
-    else:
-        # Insert new
-        sb.table("user_stats").insert({
-            "user_profile_id": user_profile_id,
-            "total_picks": 1,
-            "total_wins": 1 if is_win else 0,
-            "total_payout": payout,
-            "total_bet": 100,
-            "recovery_rate": round(payout / 100 * 100, 1) if payout else 0,
-            "win_rate": 100.0 if is_win else 0,
-            "current_streak": 1 if is_win else 0,
-            "best_payout": payout,
-            "last_updated_at": now,
-        }).execute()
+    if not preds.data:
+        return
+
+    # Get results for races this user predicted on
+    race_ids = list({p["race_id"] for p in preds.data})
+    results = sb.table("race_results") \
+        .select("race_id, winner_number, win_payout") \
+        .eq("status", "finished") \
+        .in_("race_id", race_ids) \
+        .execute()
+    result_map = {r["race_id"]: r for r in (results.data or [])}
+
+    # Calculate stats from actual data
+    total_picks = 0
+    total_wins = 0
+    total_payout = 0
+    best_payout = 0
+    current_streak = 0
+
+    for pred in sorted(preds.data, key=lambda x: x["race_id"]):
+        result = result_map.get(pred["race_id"])
+        if not result:
+            continue  # Race not finished yet
+
+        total_picks += 1
+        is_win = pred["horse_number"] == result["winner_number"]
+
+        if is_win:
+            total_wins += 1
+            total_payout += result["win_payout"]
+            current_streak += 1
+            best_payout = max(best_payout, result["win_payout"])
+        else:
+            current_streak = 0
+
+    total_bet = total_picks * 100
+    win_rate = round((total_wins / total_picks * 100), 1) if total_picks > 0 else 0
+    recovery_rate = round((total_payout / total_bet * 100), 1) if total_bet > 0 else 0
+
+    sb.table("user_stats").upsert({
+        "user_profile_id": user_profile_id,
+        "total_picks": total_picks,
+        "total_wins": total_wins,
+        "total_payout": total_payout,
+        "total_bet": total_bet,
+        "win_rate": win_rate,
+        "recovery_rate": recovery_rate,
+        "current_streak": current_streak,
+        "best_payout": best_payout,
+        "last_updated_at": now,
+    }, on_conflict="user_profile_id").execute()
+
+
+def rebuild_all_user_stats() -> int:
+    """Rebuild user_stats for ALL users from scratch.
+
+    Fixes any duplicate counting issues by recalculating from actual data.
+    Returns number of users rebuilt.
+    """
+    sb = get_client()
+
+    # Get all unique user IDs from predictions
+    all_preds = sb.table("user_predictions") \
+        .select("user_profile_id") \
+        .execute()
+    if not all_preds.data:
+        return 0
+
+    user_ids = list({p["user_profile_id"] for p in all_preds.data})
+
+    for uid in user_ids:
+        _rebuild_user_stats(uid)
+
+    logger.info(f"Rebuilt stats for {len(user_ids)} users")
+    return len(user_ids)

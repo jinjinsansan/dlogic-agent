@@ -12,3 +12,6 @@ memory/line_users.json
 .factory/
 .serena/
 data/tmp/
+*.conf
+*.txt
+!requirements.txt

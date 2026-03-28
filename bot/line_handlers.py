@@ -518,6 +518,22 @@ def _send_with_retry(send_fn, request_obj, retries: int = 1) -> bool:
             return False
 
 
+def _show_loading(user_id: str, seconds: int = 60):
+    """Show LINE loading animation (free, not counted as push message)."""
+    try:
+        requests.post(
+            "https://api.line.me/v2/bot/chat/loading/start",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
+            },
+            json={"chatId": user_id, "loadingSeconds": seconds},
+            timeout=5,
+        )
+    except Exception:
+        pass  # Non-critical — just a visual indicator
+
+
 def _reply(reply_token: str, text: str, quick_reply: QuickReply = None):
     """Send a reply message with optional quick reply."""
     with ApiClient(configuration) as api_client:
@@ -995,8 +1011,8 @@ def handle_message(event: MessageEvent):
             chunk_type = chunk.get("type")
 
             if chunk_type == "thinking" and not replied:
-                # Reply immediately (LINE reply tokens expire quickly)
-                _reply(event.reply_token, "考え中...")
+                # Show LINE loading animation (free, no push count)
+                _show_loading(user_id)
                 replied = True
 
             elif chunk_type == "tool":

@@ -219,6 +219,14 @@ def fetch_race_entries(race_id: str) -> RaceDetail | None:
             post = int(tds[0].get_text(strip=True)) if tds[0].get_text(strip=True).isdigit() else 0
             horse_number = int(tds[1].get_text(strip=True)) if tds[1].get_text(strip=True).isdigit() else 0
 
+            # Fallback: netkeiba renders waku/umaban via JS — extract from tr id="tr_N"
+            if horse_number <= 0:
+                tr_id = tr.get("id", "")
+                if tr_id.startswith("tr_"):
+                    num_str = tr_id[3:]
+                    if num_str.isdigit():
+                        horse_number = int(num_str)
+
             horse_name_el = tds[3].select_one("a")
             horse_name = horse_name_el.get_text(strip=True) if horse_name_el else tds[3].get_text(strip=True)
 
