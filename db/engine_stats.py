@@ -56,23 +56,13 @@ def save_hit_rate(
         logger.exception(f"Failed to save hit rate: {race_id} {engine}")
 
 
+RANK_MARKS = {0: "◎", 1: "○", 2: "▲", 3: "△", 4: "×"}
+
+
 def get_engine_stats(days: int = 30) -> dict:
     """Get aggregated engine stats for the last N days.
 
-    Returns:
-        {
-            "period_days": 30,
-            "total_races": 150,
-            "engines": {
-                "dlogic": {
-                    "win_hits": 25, "place_hits": 80, "total": 150,
-                    "win_rate": 16.7, "place_rate": 53.3,
-                },
-                ...
-            },
-            "best_win_engine": "metalogic",
-            "best_place_engine": "dlogic",
-        }
+    Returns overall engine stats + rank-level (◎○▲△×) hit rates.
     """
     sb = get_client()
     if not sb:
@@ -90,9 +80,9 @@ def get_engine_stats(days: int = 30) -> dict:
     if not rows:
         return {"period_days": days, "total_races": 0, "engines": {}}
 
-    # Aggregate per engine
     engine_data: dict[str, dict] = {}
     race_ids = set()
+    rank_stats: dict[str, dict[str, dict]] = {}
 
     for r in rows:
         eng = r["engine"]
@@ -105,7 +95,21 @@ def get_engine_stats(days: int = 30) -> dict:
         if r["hit_place"]:
             engine_data[eng]["place_hits"] += 1
 
-    # Calculate rates
+        # Rank-level analysis (◎○▲△×)
+        top_horses = r.get("top3_horses", [])
+        result_set = {r["result_1st"], r["result_2nd"], r["result_3rd"]}
+        if eng not in rank_stats:
+            rank_stats[eng] = {}
+        for i, horse in enumerate(top_horses[:5]):
+            mark = RANK_MARKS.get(i, "×")
+            if mark not in rank_stats[eng]:
+                rank_stats[eng][mark] = {"total": 0, "win": 0, "place": 0}
+            rank_stats[eng][mark]["total"] += 1
+            if horse == r["result_1st"]:
+                rank_stats[eng][mark]["win"] += 1
+            if horse in result_set:
+                rank_stats[eng][mark]["place"] += 1
+
     engines = {}
     best_win = ("", 0.0)
     best_place = ("", 0.0)
@@ -126,10 +130,25 @@ def get_engine_stats(days: int = 30) -> dict:
         if place_rate > best_place[1]:
             best_place = (eng, place_rate)
 
+    # Format rank stats per engine
+    rank_summary = {}
+    for eng, marks in rank_stats.items():
+        rank_summary[eng] = {}
+        for mark in ["◎", "○", "▲", "△", "×"]:
+            s = marks.get(mark)
+            if not s or s["total"] == 0:
+                continue
+            rank_summary[eng][mark] = {
+                "total": s["total"],
+                "win_rate": round(s["win"] / s["total"] * 100, 1),
+                "place_rate": round(s["place"] / s["total"] * 100, 1),
+            }
+
     return {
         "period_days": days,
         "total_races": len(race_ids),
         "engines": engines,
+        "rank_stats": rank_summary,
         "best_win_engine": best_win[0],
         "best_place_engine": best_place[0],
     }

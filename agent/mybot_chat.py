@@ -328,12 +328,12 @@ def _execute_imlogic_prediction(race_id: str, bot_settings: dict, context: dict)
             data = resp.json()
             # Format as predictions result
             rankings = data.get("rankings", [])
-            rank_labels = {1: "S", 2: "A", 3: "B", 4: "C", 5: "C"}
+            rank_labels = {1: "◎", 2: "○", 3: "▲", 4: "△", 5: "×"}
             predictions = []
             for item in rankings[:5]:
                 predictions.append({
                     "rank": item.get("rank", 0),
-                    "rank_label": rank_labels.get(item.get("rank", 5), "C"),
+                    "rank_label": rank_labels.get(item.get("rank", 5), "×"),
                     "horse_number": item.get("horse_number"),
                     "horse_name": item.get("horse_name"),
                     "total_score": item.get("total_score"),
@@ -342,7 +342,7 @@ def _execute_imlogic_prediction(race_id: str, bot_settings: dict, context: dict)
             bot_name = bot_settings.get("bot_name", "MYBOT")
 
             # Auto-record S-rank horse for recovery rate tracking
-            if predictions and predictions[0].get("rank_label") == "S":
+            if predictions and predictions[0].get("rank_label") == "◎":
                 _record_mybot_prediction(
                     bot_user_id=bot_settings.get("user_id"),
                     race_id=race_id,
@@ -382,12 +382,12 @@ def format_imlogic_predictions(data: dict) -> str:
         bot_name = next(iter(preds.keys()))
         engine_data = preds.get(bot_name, [])
 
-    rank_labels = {1: "S", 2: "A", 3: "B", 4: "C", 5: "C"}
+    rank_labels = {1: "◎", 2: "○", 3: "▲", 4: "△", 5: "×"}
     lines = ["━━ 予想結果 ━━", f"【{bot_name}】"]
     for item in (engine_data or [])[:5]:
         num = item.get("horse_number", "?")
         name = item.get("horse_name", "?")
-        rl = item.get("rank_label") or rank_labels.get(item.get("rank", 0), "C")
+        rl = item.get("rank_label") or rank_labels.get(item.get("rank", 0), "×")
         lines.append(f"{rl} {num}.{name}")
 
     return "\n".join(lines).strip()

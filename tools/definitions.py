@@ -269,7 +269,7 @@ TOOLS = [
     },
     {
         "name": "get_engine_stats",
-        "description": "予想エンジンの的中率データを取得します。Dlogic/Ilogic/ViewLogic/MetaLogicの各エンジンの単勝的中率・複勝的中率を返します。「エンジンの的中率は？」「どのエンジンが当たる？」「予想精度は？」等の質問で使ってください。",
+        "description": "予想エンジンの的中率データを取得します。Dlogic/Ilogic/ViewLogic/MetaLogicの各エンジンの単勝的中率・複勝的中率に加え、印別（◎○▲△×）の的中率も返します。「エンジンの的中率は？」「どのエンジンが当たる？」「◎の的中率は？」等の質問で使ってください。",
         "input_schema": {
             "type": "object",
             "properties": {

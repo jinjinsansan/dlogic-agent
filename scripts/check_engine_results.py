@@ -165,10 +165,11 @@ def process_race(race: dict, date_str: str) -> int:
             continue
 
         top1 = top_horses[0]
+        top5_pred = top_horses[:5]
         top3_pred = top_horses[:3]
 
         hit_win = (top1 == result_1st)
-        place_hit_count = len(set(top3_pred) & result_set)
+        place_hit_count = len(set(top5_pred) & result_set)
         hit_place = place_hit_count >= 1
 
         save_hit_rate(
@@ -179,7 +180,7 @@ def process_race(race: dict, date_str: str) -> int:
             race_type=race_type,
             engine=eng,
             top1_horse=top1,
-            top3_horses=top3_pred,
+            top3_horses=top5_pred,
             result_1st=result_1st,
             result_2nd=result_2nd,
             result_3rd=result_3rd,
@@ -189,7 +190,7 @@ def process_race(race: dict, date_str: str) -> int:
         )
 
         mark = "✅" if hit_win else ("🔶" if hit_place else "❌")
-        logger.info(f"  {mark} {eng}: pred={top3_pred} vs result=[{result_1st},{result_2nd},{result_3rd}]")
+        logger.info(f"  {mark} {eng}: pred={top5_pred} vs result=[{result_1st},{result_2nd},{result_3rd}]")
         saved += 1
 
     # Step 4: Judge user predictions + MYBOT predictions for this race

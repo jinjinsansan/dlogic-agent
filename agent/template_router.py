@@ -149,7 +149,7 @@ def _fmt_predictions(data: dict) -> str:
     if not preds:
         return "予想データがまだないみたいだ。"
 
-    rank_labels = {1: "S", 2: "A", 3: "B", 4: "C", 5: "C"}
+    rank_labels = {1: "◎", 2: "○", 3: "▲", 4: "△", 5: "×"}
     lines = ["━━ 予想結果 ━━"]
 
     track_adjusted = data.get("track_adjusted", False)
@@ -166,7 +166,7 @@ def _fmt_predictions(data: dict) -> str:
         lines.append(label)
         for item in engine_data[:5]:
             rank = item.get("rank", 0)
-            rl = rank_labels.get(rank, "C")
+            rl = rank_labels.get(rank, "×")
             num = item.get("horse_number", "?")
             name = item.get("horse_name", "?")
             lines.append(f"{rl} {num}.{name}")
