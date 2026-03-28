@@ -242,18 +242,23 @@ def fetch_race_id_map(date_str: str, venue: str, is_chihou: bool = True) -> dict
         Dict mapping race_number (int) → keibabook_race_id (str)
         e.g. {1: "2026031203010311", 2: "2026031203020311", ...}
     """
-    code_map = VENUE_CODE_MAP if is_chihou else JRA_VENUE_CODE_MAP
-    venue_code = code_map.get(venue)
-    if not venue_code:
-        logger.warning(f"keibabook: unknown venue '{venue}'")
-        return {}
-
     s = _get_session()
     if not s:
         return {}
 
     section = "chihou" if is_chihou else "cyuou"
-    url = f"{_MOBILE_URL}/{section}/nittei/{date_str}{venue_code}"
+
+    if is_chihou:
+        code_map = VENUE_CODE_MAP
+        venue_code = code_map.get(venue)
+        if not venue_code:
+            logger.warning(f"keibabook: unknown NAR venue '{venue}'")
+            return {}
+        url = f"{_MOBILE_URL}/{section}/nittei/{date_str}{venue_code}"
+    else:
+        # JRA: nittei page shows all venues on one page (venue code is ignored).
+        # Use PC site which lists all venues, then filter by venue prefix.
+        url = f"{_BASE_URL}/{section}/nittei/{date_str}"
 
     try:
         r = _request_with_retry(s, "get", url)
@@ -264,29 +269,102 @@ def fetch_race_id_map(date_str: str, venue: str, is_chihou: bool = True) -> dict
         return {}
 
     soup = BeautifulSoup(r.text, "html.parser")
-    result = {}
 
-    # Schedule page links: /chihou/syutuba/{race_id} or /cyuou/syutuba/{race_id}
-    # Link text is "1R", "2R", etc.
+    if is_chihou:
+        # NAR: single venue per page, parse directly
+        result = {}
+        for a_tag in soup.select("a[href]"):
+            href = a_tag.get("href", "")
+            m = re.search(r"/chihou/syutuba/(\d{10,16})", href)
+            if not m:
+                continue
+            link_text = a_tag.get_text(strip=True)
+            m_race = re.match(r"(\d+)R", link_text)
+            if m_race:
+                result[int(m_race.group(1))] = m.group(1)
+        if result:
+            logger.info(f"keibabook: found {len(result)} NAR races for {venue} on {date_str}")
+        return result
+
+    # JRA: page contains multiple venues in separate sections.
+    # Each section has a header like "3回中山2日目" / "1回中京6日目".
+    # Group race links by their ID prefix (same venue = same prefix).
+    prefix_races: dict[str, dict[int, str]] = {}
+    prefix_venue: dict[str, str] = {}
+
     for a_tag in soup.select("a[href]"):
         href = a_tag.get("href", "")
-        m = re.search(r"/(?:chihou|cyuou)/syutuba/(\d{10,16})", href)
+        m = re.search(r"/cyuou/syutuba/(\d{10,16})", href)
         if not m:
             continue
         race_id = m.group(1)
-
         link_text = a_tag.get_text(strip=True)
         m_race = re.match(r"(\d+)R", link_text)
-        if m_race:
-            race_num = int(m_race.group(1))
-            result[race_num] = race_id
+        if not m_race:
+            continue
+        prefix = race_id[:-2]  # Strip race number suffix
+        if prefix not in prefix_races:
+            prefix_races[prefix] = {}
+        prefix_races[prefix][int(m_race.group(1))] = race_id
 
-    if result:
-        logger.info(f"keibabook: found {len(result)} races for {venue} on {date_str}")
-    else:
-        logger.warning(f"keibabook: no races found at {url}")
+    # Identify which prefix belongs to which venue from section headers.
+    # Headers like "3回中山2日目", "1回中京6日目"
+    for section_el in soup.select("div.kaisai, div.section"):
+        header = section_el.get_text(strip=True)[:30]
+        for v in JRA_VENUE_CODE_MAP:
+            if v in header:
+                # Find the prefix used in this section's links
+                for a_tag in section_el.select("a[href]"):
+                    href = a_tag.get("href", "")
+                    m = re.search(r"/cyuou/syutuba/(\d{10,16})", href)
+                    if m:
+                        prefix = m.group(1)[:-2]
+                        prefix_venue[prefix] = v
+                        break
+                break
 
-    return result
+    # For any prefix not yet identified, fetch danwa for R1 to detect venue
+    unresolved = [p for p in prefix_races if p not in prefix_venue]
+    if unresolved:
+        for prefix in unresolved:
+            r1_id = prefix_races[prefix].get(1)
+            if not r1_id:
+                continue
+            try:
+                danwa_url = f"{_BASE_URL}/cyuou/danwa/0/{r1_id}"
+                dr = _request_with_retry(s, "get", danwa_url)
+                if dr:
+                    dsoup = BeautifulSoup(dr.text, "html.parser")
+                    h2 = dsoup.select_one("h2")
+                    if h2:
+                        h2_text = h2.get_text(strip=True)
+                        for v in JRA_VENUE_CODE_MAP:
+                            if v in h2_text:
+                                prefix_venue[prefix] = v
+                                break
+            except Exception:
+                pass
+
+    # Find the prefix for requested venue
+    target_prefix = None
+    for prefix, v in prefix_venue.items():
+        if v == venue:
+            target_prefix = prefix
+            break
+
+    if target_prefix and target_prefix in prefix_races:
+        result = prefix_races[target_prefix]
+        logger.info(f"keibabook: found {len(result)} JRA races for {venue} on {date_str}")
+        return result
+
+    # Last fallback: if only one prefix has matching race count, use it
+    if len(prefix_races) == 1:
+        result = next(iter(prefix_races.values()))
+        logger.info(f"keibabook: single venue fallback, {len(result)} races for {venue} on {date_str}")
+        return result
+
+    logger.warning(f"keibabook: could not identify {venue} races on {date_str} (prefixes={list(prefix_races.keys())})")
+    return {}
 
 
 def fetch_comments_for_race(

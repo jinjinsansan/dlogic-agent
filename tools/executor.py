@@ -1175,6 +1175,40 @@ def _get_stable_comments(params: dict) -> str:
             "note": "関係者情報が取得できませんでした（未公開、または対象外のレースです）",
         }, ensure_ascii=False)
 
+    # Validate horse names against entries and remap if mismatched
+    # (keibabook and netkeiba may assign different horse numbers)
+    if race_id in _race_cache and "entries" in _race_cache[race_id]:
+        cached = _race_cache[race_id]["entries"]
+        entry_names = dict(zip(cached.get("horse_numbers", []), cached.get("horses", [])))
+        if entry_names:
+            mismatch = False
+            for num, data in comments.items():
+                kb_name = data.get("horse_name", "")
+                entry_name = entry_names.get(num, "")
+                if kb_name and entry_name and kb_name != entry_name:
+                    mismatch = True
+                    break
+
+            if mismatch:
+                logger.warning(f"Stable comments horse name mismatch for {race_id}, remapping by name")
+                # Build name -> comment mapping from keibabook data
+                name_to_comment = {}
+                for num, data in comments.items():
+                    kb_name = data.get("horse_name", "")
+                    if kb_name:
+                        name_to_comment[kb_name] = data
+
+                # Remap to correct horse numbers from entries
+                remapped = {}
+                for num, name in entry_names.items():
+                    if name in name_to_comment:
+                        remapped[num] = name_to_comment[name]
+                        remapped[num]["horse_name"] = name
+
+                if remapped:
+                    comments = remapped
+                    logger.info(f"Remapped {len(remapped)} stable comments by horse name for {race_id}")
+
     result = {
         "race_id": race_id,
         "stable_comments": {str(k): v for k, v in sorted(comments.items())},
