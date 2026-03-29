@@ -41,6 +41,7 @@ TOOL_QUERY_MAP = {
     "get_training_comments": "training",
     "get_race_results": "race-results",
     "get_engine_stats": "engine-stats",
+    "get_internet_predictions": "internet-predictions",
 }
 
 # User message patterns → query type (for pre-loop + post-loop)
@@ -81,6 +82,10 @@ _MSG_PATTERNS = [
     ("エンジンの精度", "engine-stats"),
     ("どのくらい当たる", "engine-stats"),
     ("予想精度", "engine-stats"),
+    ("ネットの予想", "internet-predictions"),
+    ("ネット予想", "internet-predictions"),
+    ("世間の予想", "internet-predictions"),
+    ("みんなの予想は", "internet-predictions"),
 ]
 
 

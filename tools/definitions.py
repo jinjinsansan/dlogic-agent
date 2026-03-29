@@ -296,6 +296,20 @@ TOOLS = [
         }
     },
     {
+        "name": "get_internet_predictions",
+        "description": "ネット上の予想情報を取得します。YouTube予想動画と大手競馬サイトの予想を集計した結果（上位5頭+支持率）を返します。重賞レース限定。「ネットの予想は？」「ネット予想見せて」「世間の予想は？」等の質問で使ってください。display_textフィールドの内容をそのままユーザーに返してください。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "race_name": {
+                    "type": "string",
+                    "description": "レース名（例: '高松宮記念', '大阪杯'）。ユーザーが分析中のレース名を使ってください。"
+                }
+            },
+            "required": ["race_name"]
+        }
+    },
+    {
         "name": "send_inquiry",
         "description": "ユーザーからの問い合わせ・不具合報告・要望を運営に送信します。ユーザーが「問い合わせ」「エラー報告」「要望」「バグ」「おかしい」「動かない」等の意図を示した場合に使ってください。送信前にユーザーに内容を確認すること。",
         "input_schema": {

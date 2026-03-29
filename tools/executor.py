@@ -358,6 +358,8 @@ def execute_tool(tool_name: str, tool_input: dict, context: dict | None = None) 
             result = _get_engine_stats(tool_input)
         elif tool_name == "send_inquiry":
             result = _send_inquiry(tool_input, context)
+        elif tool_name == "get_internet_predictions":
+            result = _get_internet_predictions(tool_input)
         else:
             result = json.dumps({"error": f"Unknown tool: {tool_name}"}, ensure_ascii=False)
 
@@ -1784,3 +1786,34 @@ def _send_inquiry(params: dict, context: dict | None = None) -> str:
     except Exception as e:
         logger.exception("Failed to send inquiry via Telegram")
         return json.dumps({"status": "error", "message": "送信に失敗しました。"}, ensure_ascii=False)
+
+
+def _get_internet_predictions(params: dict) -> str:
+    """ネット予想のキャッシュデータを返す"""
+    race_name = params.get("race_name", "")
+    if not race_name:
+        return json.dumps({"error": "race_nameが必要です"}, ensure_ascii=False)
+
+    import glob as _glob
+    safe_name = re.sub(r'[^\w]', '_', race_name)
+    pattern = os.path.join(PREFETCH_DIR, f"internet_predictions_{safe_name}_*.json")
+    files = sorted(_glob.glob(pattern), reverse=True)
+
+    if not files:
+        all_files = sorted(_glob.glob(os.path.join(PREFETCH_DIR, "internet_predictions_*.json")), reverse=True)
+        for f in all_files:
+            try:
+                with open(f, 'r', encoding='utf-8') as fh:
+                    data = json.load(fh)
+                if race_name in data.get("race_name", ""):
+                    return json.dumps(data, ensure_ascii=False)
+            except Exception:
+                continue
+        return json.dumps({"error": f"{race_name}のネット予想データが見つかりません。まだ収集されていない可能性があります。"}, ensure_ascii=False)
+
+    try:
+        with open(files[0], 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return json.dumps(data, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": f"データ読み込みエラー: {e}"}, ensure_ascii=False)

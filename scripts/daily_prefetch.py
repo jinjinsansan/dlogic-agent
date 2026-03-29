@@ -16,6 +16,7 @@ import sys
 import os
 import json
 import logging
+import re
 from datetime import datetime, timedelta
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -152,6 +153,61 @@ def upload_to_vps(filepath, logger):
         return False
 
 
+def find_graded_races(date_str, logger=None):
+    """プリフェッチデータから重賞レース名を抽出（JRA重賞 + 地方交流重賞）"""
+    output_file = os.path.join(PREFETCH_DIR, f"races_{date_str}.json")
+    if not os.path.exists(output_file):
+        return []
+    try:
+        with open(output_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception:
+        return []
+
+    graded = []
+    for race in data.get('races', []):
+        name = race.get('race_name', '')
+        # JRA重賞: GI/GII/GIII or (G1)/(G2)/(G3)
+        # 地方交流重賞: Jpn1/Jpn2/Jpn3
+        is_graded = bool(re.search(r'(G[I1]{1,3}|GII|GIII|G2|G3|Jpn[123])', name))
+        if is_graded:
+            # グレード表記を除去してレース名だけ取り出す
+            clean_name = re.sub(r'\s*(G[I1]{1,3}|GII|GIII|G[123]|Jpn[123])\s*$', '', name).strip()
+            if clean_name:
+                graded.append(clean_name)
+                if logger:
+                    logger.info(f"  重賞検出: {name} → {clean_name}")
+    return graded
+
+
+def run_internet_predictions(race_names, date_str, logger):
+    """VPS上でネット予想収集スクリプトを実行"""
+    results = []
+    for race_name in race_names:
+        logger.info(f"  ネット予想収集: {race_name}")
+        try:
+            result = subprocess.run(
+                ["ssh", f"{VPS_USER}@{VPS_HOST}",
+                 f"cd /opt/dlogic/linebot && /opt/dlogic/linebot/venv/bin/python "
+                 f"scripts/fetch_internet_predictions.py '{race_name}' --date {date_str}"],
+                capture_output=True, text=True, encoding='utf-8', errors='replace',
+                timeout=180,
+            )
+            if result.returncode == 0:
+                logger.info(f"    {race_name}: OK")
+                results.append(f"ネット予想({race_name}): OK")
+            else:
+                logger.error(f"    {race_name}: エラー - {result.stderr[:200]}")
+                results.append(f"ネット予想({race_name}): エラー")
+        except subprocess.TimeoutExpired:
+            logger.error(f"    {race_name}: タイムアウト")
+            results.append(f"ネット予想({race_name}): タイムアウト")
+        except Exception as e:
+            logger.error(f"    {race_name}: {e}")
+            results.append(f"ネット予想({race_name}): {e}")
+    return results
+
+
 def cleanup_old_prefetch(keep_days=7, logger=None):
     """古いプリフェッチファイルを削除（ローカル + VPS）"""
     cutoff = datetime.now() - timedelta(days=keep_days)
@@ -159,9 +215,10 @@ def cleanup_old_prefetch(keep_days=7, logger=None):
 
     # ローカル
     for f in os.listdir(PREFETCH_DIR):
-        if f.startswith('races_') and f.endswith('.json'):
-            date_part = f.replace('races_', '').replace('.json', '')
-            if date_part < cutoff_str:
+        if f.endswith('.json') and (f.startswith('races_') or f.startswith('internet_predictions_')):
+            # 日付部分を抽出 (末尾の YYYYMMDD.json)
+            date_match = re.search(r'(\d{8})\.json$', f)
+            if date_match and date_match.group(1) < cutoff_str:
                 os.remove(os.path.join(PREFETCH_DIR, f))
                 if logger:
                     logger.info(f"  ローカル削除: {f}")
@@ -170,7 +227,7 @@ def cleanup_old_prefetch(keep_days=7, logger=None):
     try:
         subprocess.run(
             ["ssh", f"{VPS_USER}@{VPS_HOST}",
-             f"find {VPS_PREFETCH_DIR} -name 'races_*.json' -mtime +{keep_days} -delete"],
+             f"find {VPS_PREFETCH_DIR} -name '*.json' -mtime +{keep_days} -delete"],
             timeout=15, capture_output=True
         )
     except Exception:
@@ -249,6 +306,25 @@ def main():
             logger.info("  LINE bot再起動完了")
         except Exception:
             pass
+
+    # ネット予想収集（重賞レースのYouTube + netkeiba予想を集計）
+    logger.info("\n[ネット予想収集]")
+    graded_races = find_graded_races(date_str, logger)
+    if graded_races:
+        inet_results = run_internet_predictions(graded_races, date_str, logger)
+        results.extend(inet_results)
+        # 収集後にLINE bot再起動（キャッシュ反映）
+        if inet_results:
+            try:
+                subprocess.run(
+                    ["ssh", f"{VPS_USER}@{VPS_HOST}", "systemctl restart dlogic-linebot"],
+                    timeout=15, capture_output=True
+                )
+                logger.info("  LINE bot再起動完了（ネット予想反映）")
+            except Exception:
+                pass
+    else:
+        logger.info("  翌日の重賞レースなし → スキップ")
 
     # レスポンスキャッシュウォーミング（VPS上で実行）
     logger.info("\n[キャッシュウォーミング]")
