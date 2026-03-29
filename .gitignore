@@ -15,3 +15,10 @@ data/tmp/
 *.conf
 *.txt
 !requirements.txt
+scripts/_debug*
+scripts/_check*
+scripts/_add*
+scripts/_test*
+scripts/rank_analysis.py
+scripts/resolve_14.py
+scripts/top5_analysis.py
