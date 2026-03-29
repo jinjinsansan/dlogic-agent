@@ -212,9 +212,10 @@ _MAX_NETKEIBA_CACHE_SIZE = 200
 def _is_valid_netkeiba_id(netkeiba_id: str, date_str: str, race_type: str) -> bool:
     if not netkeiba_id or not netkeiba_id.isdigit():
         return False
-    if race_type == "nar":
-        return True
-    return len(netkeiba_id) >= 8 and netkeiba_id.startswith(date_str)
+    # JRA IDs are YYYY + venue(2) + kai(2) + day(2) + race(2) = 12 digits
+    # NAR IDs are similar but vary in length
+    # Just check it's a plausible numeric ID (year prefix match is sufficient)
+    return len(netkeiba_id) >= 10 and netkeiba_id[:4] == date_str[:4]
 
 
 def _resolve_netkeiba_race_id(
