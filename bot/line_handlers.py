@@ -269,7 +269,14 @@ def _is_race_change(text: str) -> bool:
 
 
 def _is_same_race_query(text: str) -> bool:
-    """Check if user message is about the current race (deep dive)."""
+    """Check if user message is about the current race (deep dive).
+
+    If the message contains a race number (e.g. '10R', '10レース'),
+    it's likely a different race, so return False.
+    """
+    # Race number in message → user is switching races
+    if re.search(r"\d+\s*[Rレース]", text):
+        return False
     for kw in _SAME_RACE_KEYWORDS:
         if kw in text:
             return True
@@ -976,18 +983,24 @@ def handle_message(event: MessageEvent):
         pending_race = _get_active_race(user_id) or ""
         # Allow same-race queries (展開, オッズ, etc.) to pass through
         if not _is_same_race_query(user_text):
-            # Block and re-show honmei buttons
-            honmei_qr = get_honmei_quick_reply(pending_race)
-            if honmei_qr:
-                _reply(event.reply_token,
-                       "おっと、ちょっと待ってくれ！\n\n"
-                       "今Dlogicじゃ「みんなの予想」を集めてるんだ。\n"
-                       "みんなの本命を集計して、回収率ランキングとか出していく予定なんだよ。\n\n"
-                       "どうか協力してやってくれ🙏\n"
-                       "これ押してもらわねーと俺も次に進めねーんだ…頼むよ！\n\n"
-                       "👇 下のボタンから本命をタップ！",
-                       quick_reply=honmei_qr)
-                return
+            # If user specifies a race number, they want a different race.
+            # Clear active_race so the agentic loop picks up the new one.
+            if re.search(r"\d+\s*[Rレース]", user_text):
+                logger.info(f"Honmei bypass: user switching to different race: {user_text}")
+                _clear_active_race(user_id)
+            else:
+                # Block and re-show honmei buttons
+                honmei_qr = get_honmei_quick_reply(pending_race)
+                if honmei_qr:
+                    _reply(event.reply_token,
+                           "おっと、ちょっと待ってくれ！\n\n"
+                           "今Dlogicじゃ「みんなの予想」を集めてるんだ。\n"
+                           "みんなの本命を集計して、回収率ランキングとか出していく予定なんだよ。\n\n"
+                           "どうか協力してやってくれ🙏\n"
+                           "これ押してもらわねーと俺も次に進めねーんだ…頼むよ！\n\n"
+                           "👇 下のボタンから本命をタップ！",
+                           quick_reply=honmei_qr)
+                    return
 
     # Get or create conversation history
     history = _load_history(user_id)
