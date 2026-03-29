@@ -94,6 +94,8 @@ _OPINION_KEYWORDS = [
 
 
 def _is_same_race_query(text: str) -> bool:
+    if re.search(r"\d+\s*[Rレース]", text):
+        return False
     return any(kw in text for kw in _SAME_RACE_KEYWORDS)
 
 
@@ -507,19 +509,24 @@ def chat():
     # --- Honmei blocking: pending pick ---
     if auth_payload and not profile.get("web_session"):
         if _has_pending_honmei(session, profile["id"]) and not _is_same_race_query(message):
-            pending_race = session.get("pending_honmei_race") or session.get("active_race_id")
-            honmei_items = _build_honmei_quick_replies(pending_race) if pending_race else []
-            if honmei_items:
-                save_session(session_key, session)
-                return _sse_text_response(
-                    "おっと、ちょっと待ってくれ！\n\n"
-                    "今Dlogicじゃ「みんなの予想」を集めてるんだ。\n"
-                    "みんなの本命を集計して、回収率ランキングとか出していく予定なんだよ。\n\n"
-                    "どうか協力してやってくれ🙏\n\n"
-                    "👇 下のボタンから本命をタップ！",
-                    session_id,
-                    honmei_items,
-                )
+            # If user specifies a race number, they want a different race — let them through
+            if re.search(r"\d+\s*[Rレース]", message):
+                session.pop("pending_honmei_race", None)
+                session.pop("active_race_id", None)
+            else:
+                pending_race = session.get("pending_honmei_race") or session.get("active_race_id")
+                honmei_items = _build_honmei_quick_replies(pending_race) if pending_race else []
+                if honmei_items:
+                    save_session(session_key, session)
+                    return _sse_text_response(
+                        "おっと、ちょっと待ってくれ！\n\n"
+                        "今Dlogicじゃ「みんなの予想」を集めてるんだ。\n"
+                        "みんなの本命を集計して、回収率ランキングとか出していく予定なんだよ。\n\n"
+                        "どうか協力してやってくれ🙏\n\n"
+                        "👇 下のボタンから本命をタップ！",
+                        session_id,
+                        honmei_items,
+                    )
 
     # Trim history to prevent unbounded growth
     history = trim_history(history)

@@ -212,6 +212,8 @@ _OPINION_KEYWORDS = [
 
 
 def _is_same_race_query(text: str) -> bool:
+    if re.search(r"\d+\s*[Rレース]", text):
+        return False
     return any(kw in text for kw in _SAME_RACE_KEYWORDS)
 
 
@@ -994,15 +996,19 @@ def handle_mybot_webhook(user_id: str):
             # --- Honmei blocking: pending pick ---
             if _has_pending_honmei(user_id, sender_id, profile["id"]):
                 if not _is_same_race_query(user_text):
-                    pending_race = _get_active_race(user_id, sender_id) or ""
-                    honmei_qr = get_honmei_quick_reply(pending_race)
-                    if honmei_qr:
-                        _reply(
-                            access_token, reply_token,
-                            get_msg(tone, "honmei_blocking"),
-                            quick_reply=honmei_qr,
-                        )
-                        continue
+                    # If user specifies a race number, let them switch races
+                    if re.search(r"\d+\s*[Rレース]", user_text):
+                        _clear_active_race(user_id, sender_id)
+                    else:
+                        pending_race = _get_active_race(user_id, sender_id) or ""
+                        honmei_qr = get_honmei_quick_reply(pending_race)
+                        if honmei_qr:
+                            _reply(
+                                access_token, reply_token,
+                                get_msg(tone, "honmei_blocking"),
+                                quick_reply=honmei_qr,
+                            )
+                            continue
 
             # --- Normal message: reply with thinking + run agent ---
             _reply(access_token, reply_token, get_msg(tone, "thinking"))
