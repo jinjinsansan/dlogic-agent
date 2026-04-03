@@ -360,8 +360,7 @@ def get_quick_reply(tools_used: list[str]) -> QuickReply | None:
             items.append(QuickReplyItem(action=MessageAction(label="⚖️ 馬体重", text="馬体重は？")))
         if "get_odds_signals" not in used_set:
             items.append(QuickReplyItem(action=MessageAction(label="📉 歪みは？", text="歪みは？")))
-        if "get_internet_predictions" not in used_set:
-            items.append(QuickReplyItem(action=MessageAction(label="🌐 ネットの予想", text="ネットの予想は？")))
+
         items.append(QuickReplyItem(action=MessageAction(label="🗳️ みんなの本命", text="みんなの本命比率")))
         items.append(QuickReplyItem(action=MessageAction(label="💬 どう思う？", text="お前はどう思う？")))
 
