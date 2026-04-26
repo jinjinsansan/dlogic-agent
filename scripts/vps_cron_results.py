@@ -128,6 +128,29 @@ def run_fetch_results(date_str, logger):
         return 0, 0, -1
 
 
+def run_golden_snapshot(date_str, logger):
+    """golden-pattern スナップショット保存 — 後日レビュー用"""
+    cmd = [PYTHON, os.path.join(SCRIPTS_DIR, 'snapshot_golden_pattern.py'), date_str]
+    logger.info(f"goldenスナップショット保存: {date_str}")
+    try:
+        result = subprocess.run(
+            cmd, cwd=PROJECT_DIR,
+            capture_output=True, text=True,
+            encoding='utf-8', errors='replace',
+            timeout=300,
+        )
+        for line in (result.stdout or '').strip().split('\n')[-3:]:
+            if line:
+                logger.info(f"  {line.strip()}")
+        return result.returncode
+    except subprocess.TimeoutExpired:
+        logger.error("  タイムアウト（5分）")
+        return -1
+    except Exception as e:
+        logger.error(f"  エラー: {e}")
+        return -1
+
+
 def main():
     logger = setup_logging()
     now = datetime.now(JST)
@@ -146,6 +169,10 @@ def main():
     logger.info("\n[Step 2] 追加の予想結果取得")
     fetched, judged, rc2 = run_fetch_results(date_str, logger)
 
+    # Step 3: goldenスナップショット (後日レビュー用)
+    logger.info("\n[Step 3] goldenスナップショット")
+    rc3 = run_golden_snapshot(date_str, logger)
+
     # Telegram通知
     status = "OK" if rc1 == 0 and rc2 == 0 else "NG"
     msg = (
@@ -153,11 +180,12 @@ def main():
         f"日付: {now.strftime('%m/%d')}\n"
         f"{'─' * 20}\n"
         f"エンジン: {races_done}R保存, {engine_saved}件記録\n"
-        f"予想判定: +{fetched}件取得, {judged}人更新"
+        f"予想判定: +{fetched}件取得, {judged}人更新\n"
+        f"goldenスナップショット: {'OK' if rc3 == 0 else 'NG'}"
     )
     send_telegram(msg)
 
-    logger.info(f"\n完了: engine={races_done}R/{engine_saved}件, fetch=+{fetched}/{judged}人")
+    logger.info(f"\n完了: engine={races_done}R/{engine_saved}件, fetch=+{fetched}/{judged}人, snapshot={'OK' if rc3 == 0 else 'NG'}")
     return 0 if rc1 == 0 and rc2 == 0 else 1
 
 
