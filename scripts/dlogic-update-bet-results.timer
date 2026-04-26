@@ -1,0 +1,13 @@
+[Unit]
+Description=HorseBet bet_history result updater (multiple times daily)
+
+[Timer]
+# Asia/Tokyo を明示固定（VPS タイムゾーン誤変更の影響を受けない）
+OnCalendar=*-*-* 12:00:00 Asia/Tokyo
+OnCalendar=*-*-* 18:00:00 Asia/Tokyo
+OnCalendar=*-*-* 23:00:00 Asia/Tokyo
+Persistent=true
+Unit=dlogic-update-bet-results.service
+
+[Install]
+WantedBy=timers.target

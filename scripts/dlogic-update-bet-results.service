@@ -1,0 +1,11 @@
+[Unit]
+Description=HorseBet bet_history result updater (one-shot)
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/dlogic/linebot
+ExecStart=/opt/dlogic/linebot/venv/bin/python scripts/update_bet_results.py
+TimeoutStartSec=600
+User=root
+Environment=HOME=/root

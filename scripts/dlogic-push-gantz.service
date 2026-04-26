@@ -1,0 +1,11 @@
+[Unit]
+Description=GANTZ -> HorseBet Supabase bridge (one-shot)
+After=network.target dlogic-anatou-strict.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/dlogic/linebot
+ExecStart=/opt/dlogic/linebot/venv/bin/python scripts/push_gantz_to_horse.py
+TimeoutStartSec=600
+User=root
+Environment=HOME=/root
