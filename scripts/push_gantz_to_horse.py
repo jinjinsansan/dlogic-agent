@@ -123,6 +123,7 @@ def build_note(race: dict[str, Any]) -> str:
 
 
 def race_to_signal_row(race: dict[str, Any], signal_date_iso: str, source: str) -> dict[str, Any] | None:
+    """Layer 1 (NAR本命厳格 単勝) — 1 row per race."""
     venue = race.get("venue") or ""
     is_local = bool(race.get("is_local"))
     jo_code = resolve_jo_code(venue, is_local)
@@ -157,6 +158,162 @@ def race_to_signal_row(race: dict[str, Any], signal_date_iso: str, source: str) 
         "source": source,
         "created_by": None,
     }
+
+
+def _build_base_row(race: dict[str, Any], signal_date_iso: str) -> dict[str, Any] | None:
+    """Layer 2/3 共通のベース row 部分."""
+    venue = race.get("venue") or ""
+    is_local = bool(race.get("is_local"))
+    jo_code = resolve_jo_code(venue, is_local)
+    if jo_code is None:
+        return None
+    race_no = race.get("race_number")
+    if not race_no:
+        return None
+    return {
+        "signal_date": signal_date_iso,
+        "race_type": "NAR" if is_local else "JRA",
+        "jo_code": jo_code,
+        "jo_name": venue,
+        "race_no": int(race_no),
+        "suggested_amount": 100,
+        "status": "active",
+        "start_time": race.get("start_time") or None,
+        "created_by": None,
+    }
+
+
+def race_to_jra_layer3_rows(race: dict[str, Any], signal_date_iso: str) -> list[dict[str, Any]]:
+    """Layer 3 (JRA S級) — F5複勝 + U2馬連BOX3 + S1三連複1点.
+
+    各馬/各組合せを独立 row、unique source で uniqueness 確保。
+    """
+    from itertools import combinations
+    base = _build_base_row(race, signal_date_iso)
+    if not base:
+        return []
+
+    rows: list[dict[str, Any]] = []
+    venue = race.get("venue") or ""
+
+    # F5複勝: 3エンジン以上 top3一致馬 → 各馬 複勝
+    f5_horses = race.get("jra_f5_horses") or []
+    for i, h in enumerate(f5_horses, 1):
+        hn = h.get("horse_number")
+        if not hn:
+            continue
+        rows.append({
+            **base,
+            "bet_type": 2, "bet_type_name": "複勝", "method": 0,
+            "kaime_data": [str(hn)],
+            "note": (
+                f"GANTZ jra-f5 複勝 | {hn}番{h.get('horse_name','?')} | "
+                f"{h.get('popularity','?')}人気 | 一致{h.get('vote_count','?')}/4"
+            ),
+            "source": f"gantz_jra_f5_p{i}",
+        })
+
+    # U2馬連BOX3 + S1三連複1点: 投票TOP3頭 (jra_top3_horses)
+    top3 = race.get("jra_top3_horses") or []
+    if len(top3) == 3:
+        nums = [h.get("horse_number") for h in top3]
+        # U2 馬連BOX3 (3点)
+        for i, (h1, h2) in enumerate(combinations(nums, 2), 1):
+            rows.append({
+                **base,
+                "bet_type": 4, "bet_type_name": "馬連", "method": 0,
+                "kaime_data": [str(h1), str(h2)],
+                "note": (
+                    f"GANTZ jra-u2 馬連 | {h1}-{h2} | {venue}"
+                ),
+                "source": f"gantz_jra_u2_w{i}",
+            })
+        # S1 三連複1点 (TOP3 BOX = 1組)
+        rows.append({
+            **base,
+            "bet_type": 7, "bet_type_name": "３連複", "method": 0,
+            "kaime_data": [str(n) for n in nums],
+            "note": (
+                f"GANTZ jra-s1 三連複 | {nums[0]}-{nums[1]}-{nums[2]} | {venue}"
+            ),
+            "source": "gantz_jra_s1",
+        })
+
+    return rows
+
+
+def race_to_obihiro_rows(race: dict[str, Any], signal_date_iso: str) -> list[dict[str, Any]]:
+    """Layer 2 (帯広中穴 複勝+ワイドBOX) — 複数 rows per race.
+
+    複勝: 各馬を個別 row として、source='gantz_obihiro_p{i}' で uniqueness 確保
+    ワイドBOX: 各ペアを個別 row、source='gantz_obihiro_w{i}'
+    """
+    from itertools import combinations
+    venue = race.get("venue") or ""
+    is_local = bool(race.get("is_local"))
+    jo_code = resolve_jo_code(venue, is_local)
+    if jo_code is None:
+        return []
+
+    horses = race.get("obihiro_horses") or []
+    if not horses:
+        return []
+
+    race_no = race.get("race_number")
+    if not race_no:
+        return []
+
+    base = {
+        "signal_date": signal_date_iso,
+        "race_type": "NAR" if is_local else "JRA",
+        "jo_code": jo_code,
+        "jo_name": venue,
+        "race_no": int(race_no),
+        "suggested_amount": 100,
+        "status": "active",
+        "start_time": race.get("start_time") or None,
+        "created_by": None,
+    }
+
+    rows: list[dict[str, Any]] = []
+    # 複勝: 1 row per horse
+    for i, h in enumerate(horses, 1):
+        hn = h.get("horse_number")
+        if not hn:
+            continue
+        rows.append({
+            **base,
+            "bet_type": 2,
+            "bet_type_name": "複勝",
+            "method": 0,
+            "kaime_data": [str(hn)],
+            "note": (
+                f"GANTZ obihiro 複勝 | {hn}番{h.get('horse_name','?')} | "
+                f"{h.get('popularity','?')}人気 | 一致{h.get('vote_count','?')}/4"
+            ),
+            "source": f"gantz_obihiro_p{i}",
+        })
+
+    # ワイドBOX: 1 row per pair
+    if len(horses) >= 2:
+        for i, (h1, h2) in enumerate(combinations(horses, 2), 1):
+            n1 = h1.get("horse_number"); n2 = h2.get("horse_number")
+            if not n1 or not n2:
+                continue
+            rows.append({
+                **base,
+                "bet_type": 5,
+                "bet_type_name": "ワイド",
+                "method": 0,
+                "kaime_data": [str(n1), str(n2)],
+                "note": (
+                    f"GANTZ obihiro ワイド | {n1}-{n2} | "
+                    f"{h1.get('popularity','?')}人気×{h2.get('popularity','?')}人気"
+                ),
+                "source": f"gantz_obihiro_w{i}",
+            })
+
+    return rows
 
 
 # ---- Supabase upsert ----
@@ -225,25 +382,45 @@ def main() -> int:
         return 0
 
     races = data.get("races") or []
+    # Layer 1: strict のみがデフォルト。--include-loose で strict OR loose も対象
     if args.include_loose:
-        targets = [r for r in races if r.get("is_golden_loose") or r.get("is_golden_strict")]
+        layer1_targets = [r for r in races if r.get("is_golden_strict") or r.get("is_golden_loose")]
+        logger.info("--include-loose active: strict+loose races included for L1")
     else:
-        targets = [r for r in races if r.get("is_golden_strict")]
+        layer1_targets = [r for r in races if r.get("is_golden_strict")]
+    layer2_targets = [r for r in races if r.get("is_layer2_obihiro")]
+    layer3_targets = [r for r in races
+                      if r.get("is_layer3_jra_f5") or r.get("is_layer3_jra_combo")]
 
-    logger.info("fetched %d races, %d target(s) for source=%s",
-                len(races), len(targets), args.source)
-    if not targets:
-        logger.info("nothing to push — exit")
-        return 0
+    logger.info("fetched %d races: L1=%d L2=%d L3=%d",
+                len(races), len(layer1_targets), len(layer2_targets), len(layer3_targets))
 
     iso_date = date_to_iso(date_str)
     rows: list[dict[str, Any]] = []
-    for r in targets:
-        row = race_to_signal_row(r, iso_date, args.source)
+
+    # Layer 1: NAR本命厳格 単勝 (1 row per race)
+    for r in layer1_targets:
+        # loose のみのレースには source を 'gantz_loose' に上書き
+        src = args.source
+        if args.include_loose and not r.get("is_golden_strict") and r.get("is_golden_loose"):
+            src = "gantz_loose"
+        row = race_to_signal_row(r, iso_date, src)
         if row is not None:
             rows.append(row)
         else:
             logger.warning("skip race %s due to mapping failure", r.get("race_id"))
+
+    # Layer 2: 帯広中穴 複勝+ワイドBOX (multiple rows per race)
+    for r in layer2_targets:
+        rows.extend(race_to_obihiro_rows(r, iso_date))
+
+    # Layer 3: JRA S級 (週末) 複勝 + 馬連BOX3 + 三連複1点
+    for r in layer3_targets:
+        rows.extend(race_to_jra_layer3_rows(r, iso_date))
+
+    if not rows:
+        logger.info("nothing to push — exit")
+        return 0
 
     logger.info("prepared %d signal row(s)", len(rows))
 

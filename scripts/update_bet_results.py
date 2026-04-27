@@ -111,15 +111,27 @@ def fetch_signals(signal_ids: list[int]) -> dict[int, dict[str, Any]]:
 
 def fetch_race_results(date_iso_set: set[str]) -> dict[str, dict[str, Any]]:
     """date_iso_set: {'2026-04-24', ...} → {race_id: result}"""
+    import json as _json
     if not date_iso_set:
         return {}
     date_list = "(" + ",".join(f'"{d}"' for d in date_iso_set) + ")"
     rows = _sb_get(
         DLOGIC_URL, DLOGIC_KEY, "race_results",
         {"race_date": f"in.{date_list}", "status": "eq.finished",
-         "select": "race_id,winner_number,win_payout"},
+         "select": "race_id,winner_number,win_payout,result_json"},
     )
-    return {r["race_id"]: r for r in rows}
+    out: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        rj = r.get("result_json")
+        if isinstance(rj, str):
+            try:
+                r["result_json"] = _json.loads(rj)
+            except Exception:
+                r["result_json"] = {}
+        elif not isinstance(rj, dict):
+            r["result_json"] = {}
+        out[r["race_id"]] = r
+    return out
 
 
 def update_bet(bet_id: int, result: str, payout: int) -> bool:
@@ -132,15 +144,16 @@ def update_bet(bet_id: int, result: str, payout: int) -> bool:
 
 # ────── GANTZ outcome（個人投票と独立した「全体結果」） ──────
 def fetch_pending_gantz_signals() -> list[dict[str, Any]]:
-    """outcome_status='pending' な GANTZ signals を取得。直近 30 日分のみ"""
+    """outcome_status='pending' な GANTZ signals を取得。直近 30 日分のみ。
+    L1 単勝 / L2 複勝・ワイド / L3 複勝・馬連・三連複 を全て対象とする。"""
     cutoff = (datetime.now(JST) - timedelta(days=30)).strftime("%Y-%m-%d")
     return _sb_get(
         HORSE_URL, HORSE_KEY, "bet_signals",
         {
-            "source": "like.gantz_*",          # gantz_strict / gantz_loose
+            "source": "like.gantz_*",
             "outcome_status": "eq.pending",
             "signal_date": f"gte.{cutoff}",
-            "bet_type": "eq.1",                 # 単勝のみ
+            # bet_type フィルタ削除: L2(2,5)/L3(2,4,7) も対象
             "select": "id,signal_date,jo_name,race_no,bet_type,kaime_data",
         },
     )
@@ -164,9 +177,97 @@ def update_signal_outcome(
     )
 
 
+def _resolve_gantz_outcome(
+    sig: dict[str, Any], result: dict[str, Any]
+) -> tuple[str, int | None, int | None]:
+    """bet_type ごとの勝敗を判定。
+    Returns: (outcome, winner_number_or_none, payout_per_100_or_none)
+    outcome は 'win' | 'lose' | 'unknown'
+    """
+    rj = result.get("result_json") or {}
+    top3_list = rj.get("top3") or []
+    top3_horses = [t.get("horse_number") for t in top3_list if t.get("horse_number")]
+    payouts = rj.get("payouts") or {}
+
+    bet_type = int(sig.get("bet_type") or 1)
+    kaime = sig.get("kaime_data") or []
+
+    def _horse(idx: int) -> int:
+        try:
+            return int(kaime[idx]) if len(kaime) > idx else 0
+        except (ValueError, TypeError):
+            return 0
+
+    if bet_type == 1:  # 単勝
+        h = _horse(0)
+        if not h:
+            return ("unknown", None, None)
+        winner = result.get("winner_number")
+        win_payout = int(result.get("win_payout") or 0)
+        if h == winner:
+            return ("win", winner, win_payout)
+        return ("lose", winner, 0)
+
+    if bet_type == 2:  # 複勝
+        h = _horse(0)
+        if not h or not top3_horses:
+            return ("unknown", None, None)
+        fuku_payout = 0
+        for entry in (payouts.get("fukusho") or []):
+            if entry.get("horse_number") == h:
+                fuku_payout = entry.get("payout") or 0
+                break
+        if h in top3_horses:
+            return ("win", None, fuku_payout)
+        return ("lose", None, 0)
+
+    if bet_type == 4:  # 馬連
+        h1, h2 = _horse(0), _horse(1)
+        if not h1 or not h2 or len(top3_horses) < 2:
+            return ("unknown", None, None)
+        top2_set = frozenset(top3_horses[:2])
+        umaren_payout = 0
+        um = payouts.get("umaren") or {}
+        if frozenset(um.get("combo") or []) == frozenset([h1, h2]):
+            umaren_payout = um.get("payout") or 0
+        if frozenset([h1, h2]) == top2_set:
+            return ("win", None, umaren_payout)
+        return ("lose", None, 0)
+
+    if bet_type == 5:  # ワイド
+        h1, h2 = _horse(0), _horse(1)
+        if not h1 or not h2 or not top3_horses:
+            return ("unknown", None, None)
+        top3_set = set(top3_horses[:3])
+        wide_payout = 0
+        target = frozenset([h1, h2])
+        for entry in (payouts.get("wide") or []):
+            if frozenset(entry.get("combo") or []) == target:
+                wide_payout = entry.get("payout") or 0
+                break
+        if h1 in top3_set and h2 in top3_set:
+            return ("win", None, wide_payout)
+        return ("lose", None, 0)
+
+    if bet_type == 7:  # 三連複
+        h1, h2, h3 = _horse(0), _horse(1), _horse(2)
+        if not h1 or not h2 or not h3 or len(top3_horses) < 3:
+            return ("unknown", None, None)
+        top3_set = frozenset(top3_horses[:3])
+        san_payout = 0
+        san = payouts.get("sanrenpuku") or {}
+        if frozenset(san.get("combo") or []) == frozenset([h1, h2, h3]):
+            san_payout = san.get("payout") or 0
+        if frozenset([h1, h2, h3]) == top3_set:
+            return ("win", None, san_payout)
+        return ("lose", None, 0)
+
+    return ("unknown", None, None)
+
+
 def update_gantz_outcomes(results_cache: dict[str, dict[str, Any]]) -> tuple[int, int, int]:
     """
-    bet_signals.outcome_* を更新。
+    bet_signals.outcome_* を更新。L1(単勝)/L2(複勝,ワイド)/L3(複勝,馬連,三連複) 全対応。
     引数の results_cache は既に取得済みの race_results を使い回し、
     不足分は本関数内で追加 fetch する。
     Returns (win, lose, failed)
@@ -203,29 +304,24 @@ def update_gantz_outcomes(results_cache: dict[str, dict[str, Any]]) -> tuple[int
         if not result:
             continue  # まだ結果未確定。pending のまま据え置き
 
-        kaime = sig.get("kaime_data") or []
-        try:
-            target_horse = int(kaime[0]) if kaime else 0
-        except (ValueError, TypeError):
-            target_horse = 0
-        if not target_horse:
+        outcome, winner_num, payout = _resolve_gantz_outcome(sig, result)
+        if outcome == "unknown":
+            logger.debug("GANTZ signal %d: outcome unknown (bet_type=%s, kaime=%s)",
+                         sig["id"], sig.get("bet_type"), sig.get("kaime_data"))
             continue
 
-        winner = result.get("winner_number")
-        win_payout = int(result.get("win_payout") or 0)
-
-        if target_horse == winner:
-            if update_signal_outcome(sig["id"], "win", winner, win_payout):
+        if outcome == "win":
+            if update_signal_outcome(sig["id"], "win", winner_num, payout):
                 win += 1
-                logger.info("GANTZ signal %d: WIN race=%s horse=%d payout/100=%d",
-                            sig["id"], race_id, target_horse, win_payout)
+                logger.info("GANTZ signal %d: WIN race=%s bet_type=%s payout/100=%s",
+                            sig["id"], race_id, sig.get("bet_type"), payout)
             else:
                 failed += 1
         else:
-            if update_signal_outcome(sig["id"], "lose", winner, 0):
+            if update_signal_outcome(sig["id"], "lose", winner_num, 0):
                 lose += 1
-                logger.info("GANTZ signal %d: LOSE race=%s bet=%d winner=%s",
-                            sig["id"], race_id, target_horse, winner)
+                logger.info("GANTZ signal %d: LOSE race=%s bet_type=%s",
+                            sig["id"], race_id, sig.get("bet_type"))
             else:
                 failed += 1
 
@@ -262,7 +358,8 @@ def main() -> int:
         if not sig:
             skipped += 1
             continue
-        if sig.get("bet_type") != 1:  # 単勝以外スキップ（将来対応）
+        # bet_type 1/2/4/5/7 に対応。未対応 bet_type はスキップ
+        if sig.get("bet_type") not in (1, 2, 4, 5, 7):
             skipped += 1
             continue
 
@@ -273,33 +370,30 @@ def main() -> int:
             skipped += 1
             continue
 
-        kaime = bet.get("selected_kaime") or []
-        try:
-            bet_horse = int(kaime[0]) if kaime else 0
-        except (ValueError, TypeError):
-            bet_horse = 0
-        if not bet_horse:
+        # bet_history の selected_kaime を sig の kaime_data 相当として使用
+        fake_sig = {**sig, "kaime_data": bet.get("selected_kaime") or sig.get("kaime_data") or []}
+        outcome, _winner_num, payout_per_100 = _resolve_gantz_outcome(fake_sig, result)
+        if outcome == "unknown":
             skipped += 1
             continue
 
-        winner = result.get("winner_number")
         bet_amount = bet.get("bet_amount") or 0
+        ratio = bet_amount / 100 if bet_amount else 1
 
-        if bet_horse == winner:
-            ratio = bet_amount / 100 if bet_amount else 0
-            payout = int((result.get("win_payout") or 0) * ratio)
+        if outcome == "win":
+            payout = int((payout_per_100 or 0) * ratio)
             if update_bet(bet["id"], "win", payout):
                 win_count += 1
-                logger.info("bet %d: WIN payout=%d (race=%s horse=%d)",
-                            bet["id"], payout, race_id, bet_horse)
+                logger.info("bet %d: WIN payout=%d (race=%s bet_type=%s)",
+                            bet["id"], payout, race_id, sig.get("bet_type"))
             else:
                 failed += 1
                 logger.error("bet %d: PATCH failed (intended WIN payout=%d)", bet["id"], payout)
         else:
             if update_bet(bet["id"], "lose", 0):
                 lose_count += 1
-                logger.info("bet %d: LOSE (race=%s bet=%d winner=%s)",
-                            bet["id"], race_id, bet_horse, winner)
+                logger.info("bet %d: LOSE (race=%s bet_type=%s)",
+                            bet["id"], race_id, sig.get("bet_type"))
             else:
                 failed += 1
                 logger.error("bet %d: PATCH failed (intended LOSE)", bet["id"])

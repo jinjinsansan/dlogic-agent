@@ -105,6 +105,33 @@ def run_prefetch(date_str, flags, logger):
         return None
 
 
+def enrich_banei_odds(filepath, date_str, logger):
+    """帯広(ばんえい)の odds + start_time を keiba.go.jp から取得して prefetch に埋める.
+
+    netkeibaが対応しないため、別途スクレイプして上書き保存する.
+    """
+    try:
+        sys.path.insert(0, os.path.join(PROJECT_DIR, 'scrapers'))
+        from banei_odds import fill_banei_odds_in_prefetch
+    except ImportError as e:
+        logger.warning(f"  banei_odds 読込失敗: {e}")
+        return False
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            prefetch = json.load(f)
+        updated = fill_banei_odds_in_prefetch(prefetch, date_str)
+        if updated > 0:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(prefetch, f, ensure_ascii=False, indent=2)
+            logger.info(f"  帯広odds+start_time: {updated}レース更新")
+        else:
+            logger.info(f"  帯広: 更新不要 (帯広開催なし or 既に埋まっている)")
+        return True
+    except Exception as e:
+        logger.warning(f"  帯広odds失敗: {e}")
+        return False
+
+
 def upload_to_r2(filepath, logger):
     """プリフェッチJSONをR2 CDNにアップロード（ビューア用）"""
     filename = os.path.basename(filepath)
@@ -283,6 +310,15 @@ def main():
         results.append(f"明後日NAR: OK")
     else:
         results.append(f"明後日NAR: 未掲載")
+
+    # 帯広(ばんえい)の odds + start_time を keiba.go.jp から取得して埋める
+    # netkeibaが帯広に未対応のため、prefetch直後に enrichment が必要
+    logger.info("\n[帯広odds enrich]")
+    for f in files_to_upload:
+        # ファイル名から日付抽出 (races_YYYYMMDD.json)
+        m = re.search(r'races_(\d{8})\.json$', f)
+        if m:
+            enrich_banei_odds(f, m.group(1), logger)
 
     # R2アップロード（ビューア用）
     logger.info("\n[R2 CDN]")

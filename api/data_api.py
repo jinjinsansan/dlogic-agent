@@ -25,49 +25,49 @@ logger = logging.getLogger(__name__)
 
 bp = Blueprint("data_api", __name__, url_prefix="/api/data")
 
-# Golden pattern config v5 (engine_accuracy_audit_v5_FINAL_20260427.md, 1年・13,529R根拠)
-# v3まで使われていた "強5会場" は長期データで弱いと判明、新v4強会場に置換
-# v3 weekday別暫定厳格は廃止、月-金一律で配信 (土日のみ沈黙)
-GOLDEN_STRONG_VENUES_V4 = {"川崎", "船橋", "大井", "浦和", "門別", "笠松"}
-GOLDEN_SOUTH_NANKAN = {"川崎", "船橋", "大井", "浦和"}
+# Golden pattern v6 (2026-04-27 Plan A デプロイ)
+# Clean 2ヶ月データで leakage 除去後、4/25旧監査の本命厳格条件のみが S級として残った
+# (CI下限 225%, n=145, 回収率396.9%)。v5 は汚染データ由来として全廃止。
+#
+# Layer 1 (NAR strict): NAR + 火水木 + 6-12頭 + 5-8人気 + 旧強5会場 + 2-3一致
+#   → is_golden_strict (単勝¥100)
+# Layer 2 (帯広中穴): 帯広 + 4エンジン top3 union の人気5-10位馬 (複勝+ワイドBOX)
+#   → is_layer2_obihiro / obihiro_horses
+# Layer 3 (JRA S級): JRA 土日 + F5複勝 / U2馬連BOX3 / S1三連複1点
+#   → is_layer3_jra_f5 / is_layer3_jra_combo
+
+# Layer 1 (NAR本命厳格)
+OLD_STRONG5 = {"園田", "水沢", "高知", "笠松", "金沢"}
+LAYER1_WEEKDAYS = {1, 2, 3}  # 火(1), 水(2), 木(3)
+LAYER1_FIELD_MIN = 6
+LAYER1_FIELD_MAX = 12
+LAYER1_POP_MIN = 5
+LAYER1_POP_MAX = 8
+
+# Layer 2 (帯広中穴): 4エンジン top3 union のうち人気5-10位馬を 複勝 + ワイドBOX
+# clean 2ヶ月実績: 複勝131%(n=108) / ワイドBOX149%(n=89)
+LAYER2_VENUES = {"帯広"}
+LAYER2_POP_MIN = 5
+LAYER2_POP_MAX = 10
+LAYER2_MAX_HORSES = 4  # ワイドBOX 4頭=6点まで
+
+# Layer 3 (JRA S級): 週末 JRA 用。S級14戦略から 安定3戦略を選抜
+# - F5_3engT3合議の複勝 (n=590, 130.6%, CI下限118%) ← 安定運用
+# - U2_TOP3投票の馬連BOX3 (n=1116, 325.9%, CI下限213%) ← バランス
+# - S1_TOP3投票の三連複1点 (n=372, 836.9%, CI下限231%) ← ハイリターン
+LAYER3_MIN_T3_CONS = 3   # F5: 3エンジン以上 top3 一致
+LAYER3_T3_TOP_N = 3      # U2/S1: 投票上位3頭から馬連/三連複組合せ
+LAYER3_WEEKDAYS = {5, 6}  # 土(5), 日(6) のみ — 週末JRA限定
+
 GOLDEN_ENGINE_KEYS = ["Dlogic", "Ilogic", "ViewLogic", "MetaLogic"]
 
-# 旧v3定数 (互換のため残置、新コードでは使わない)
-GOLDEN_BEST_VENUES = {"園田", "水沢", "高知", "笠松", "金沢"}
-GOLDEN_BEST_WEEKDAYS = {1, 2, 3}
-
-# 3軸ピンポイント特異点 TOP10 (recov >= 200%, n >= 30)
-PINPOINT_PATTERNS = [
-    {"venue": "門別",   "pop": 6,  "cons": 3, "recov": 505, "n": 32},
-    {"venue": "高知",   "pop": 10, "cons": 3, "recov": 348, "n": 30},
-    {"venue": "笠松",   "pop": 6,  "cons": 2, "recov": 342, "n": 40},
-    {"venue": "笠松",   "pop": 6,  "cons": 3, "recov": 342, "n": 43},
-    {"venue": "浦和",   "pop": 4,  "cons": 2, "recov": 315, "n": 32},
-    {"venue": "大井",   "pop": 5,  "cons": 2, "recov": 266, "n": 35},
-    {"venue": "笠松",   "pop": 5,  "cons": 2, "recov": 251, "n": 39},
-    {"venue": "笠松",   "pop": 7,  "cons": 2, "recov": 244, "n": 40},
-    {"venue": "水沢",   "pop": 8,  "cons": 2, "recov": 242, "n": 37},
-    {"venue": "名古屋", "pop": 5,  "cons": 3, "recov": 207, "n": 51},
-]
-
-# 旧 GOLDEN_PER_WEEKDAY は v5 では未使用 (互換のため空dictで残置)
+# 旧定数 (互換用、新ロジックでは未使用)
+GOLDEN_STRONG_VENUES_V4 = {"川崎", "船橋", "大井", "浦和", "門別", "笠松"}
+GOLDEN_SOUTH_NANKAN = {"川崎", "船橋", "大井", "浦和"}
+GOLDEN_BEST_VENUES = OLD_STRONG5
+GOLDEN_BEST_WEEKDAYS = LAYER1_WEEKDAYS
 GOLDEN_PER_WEEKDAY = {0: None, 1: None, 2: None, 3: None, 4: None, 5: None, 6: None}
-
-
-def _check_pinpoint(venue: str, pop_rank: int | None, cons_count: int) -> dict | None:
-    """3軸ピンポイント特異点に該当するか判定."""
-    if pop_rank is None:
-        return None
-    for pp in PINPOINT_PATTERNS:
-        if pp["venue"] == venue and pp["pop"] == pop_rank and pp["cons"] == cons_count:
-            return {
-                "venue": pp["venue"],
-                "pop": pp["pop"],
-                "cons": pp["cons"],
-                "recov": pp["recov"],
-                "n": pp["n"],
-            }
-    return None
+PINPOINT_PATTERNS = []  # v5 ピンポイントは汚染データ由来、廃止
 
 
 @bp.route("/races", methods=["GET"])
@@ -182,11 +182,12 @@ def _fetch_results_for_date(date_str: str) -> dict:
 
 
 def _build_race_result(eval_result: dict, race_result: dict | None) -> dict | None:
-    """Attach race outcome and golden-pattern P/L info."""
+    """Attach race outcome and per-layer P/L info."""
     if not race_result:
         return None
     rj = race_result.get("result_json") or {}
     top3 = rj.get("top3") or []
+    payouts = rj.get("payouts") or {}
     cons_horse = eval_result.get("consensus", {}).get("horse_number")
     winner_number = race_result.get("winner_number")
     win_payout = race_result.get("win_payout") or 0
@@ -195,11 +196,45 @@ def _build_race_result(eval_result: dict, race_result: dict | None) -> dict | No
     did_win = bool(cons_horse and cons_horse == winner_number)
     did_place = bool(cons_horse and cons_horse in top3_numbers)
 
-    # Profit only meaningful when the race was a buy candidate (loose or strict)
+    # Layer 1 profit (単勝)
     is_buy = eval_result.get("is_golden_loose") or eval_result.get("is_golden_strict")
     profit = None
     if is_buy:
         profit = (win_payout - 100) if did_win else -100
+
+    # Layer 2 (帯広中穴) outcome per-horse: check placement in top3
+    obihiro_outcomes = []
+    for h in (eval_result.get("obihiro_horses") or []):
+        hn = h.get("horse_number")
+        placed = hn in top3_numbers
+        fukusho_payout = 0
+        for entry in (payouts.get("fukusho") or []):
+            if entry.get("horse_number") == hn:
+                fukusho_payout = entry.get("payout") or 0
+                break
+        obihiro_outcomes.append({
+            "horse_number": hn,
+            "placed": placed,
+            "fukusho_payout": fukusho_payout,
+        })
+
+    # Layer 3 F5 (複勝) outcome per-horse
+    f5_outcomes = []
+    for h in (eval_result.get("jra_f5_horses") or []):
+        hn = h.get("horse_number")
+        placed = hn in top3_numbers
+        fukusho_payout = 0
+        for entry in (payouts.get("fukusho") or []):
+            if entry.get("horse_number") == hn:
+                fukusho_payout = entry.get("payout") or 0
+                break
+        f5_outcomes.append({"horse_number": hn, "placed": placed, "fukusho_payout": fukusho_payout})
+
+    # Layer 3 U2/S1 outcome
+    top3_pick = [h.get("horse_number") for h in (eval_result.get("jra_top3_horses") or [])]
+    top3_pick_set = set(top3_pick)
+    top3_result_set = set(top3_numbers[:3])
+    l3_combo_hit = len(top3_pick) == 3 and top3_pick_set == top3_result_set
 
     return {
         "status": "finished",
@@ -209,6 +244,9 @@ def _build_race_result(eval_result: dict, race_result: dict | None) -> dict | No
         "did_consensus_win": did_win,
         "did_consensus_place": did_place,
         "profit_yen": profit,
+        "obihiro_outcomes": obihiro_outcomes,
+        "f5_outcomes": f5_outcomes,
+        "l3_combo_hit": l3_combo_hit,
     }
 
 
@@ -238,7 +276,8 @@ def _evaluate_golden_pattern(race: dict, weekday: int) -> dict:
         "distance": race.get("distance", ""),
         "track_condition": race.get("track_condition", "良"),
     }
-    engine_picks = {}
+    engine_picks = {}      # top1 picks (Layer 1 用)
+    engine_top3 = {}       # top3 picks (Layer 2 用)
     try:
         preds_json = _get_predictions(pred_params)
         preds_data = json.loads(preds_json)
@@ -251,10 +290,13 @@ def _evaluate_golden_pattern(race: dict, weekday: int) -> dict:
                     "horse_number": top1.get("horse_number"),
                     "horse_name": top1.get("horse_name", ""),
                 }
+                engine_top3[label.lower()] = [
+                    p.get("horse_number") for p in arr[:3] if p.get("horse_number")
+                ]
     except Exception as e:
         logger.warning(f"predictions failed for {race.get('race_id')}: {e}")
 
-    # Consensus
+    # Consensus (Layer 1 top1合議)
     pick_nums = [p["horse_number"] for p in engine_picks.values() if p.get("horse_number")]
     cons_horse, cons_count, agreed = None, 0, []
     if pick_nums:
@@ -264,37 +306,79 @@ def _evaluate_golden_pattern(race: dict, weekday: int) -> dict:
 
     cons_pop = pop_rank_map.get(cons_horse) if cons_horse else None
 
+    # top3 union (Layer 2 用)
+    votes_t3 = Counter()
+    for top3_list in engine_top3.values():
+        for h in top3_list:
+            if h: votes_t3[h] += 1
+
     # Filters
     is_nar = bool(race.get("is_local"))
     venue = race.get("venue", "")
     total_horses = len(horse_numbers)
 
-    # 旧 v3互換 (ブランド移行期のため一時保持、新ロジックでは未使用)
-    is_loose = (
-        cons_count in (2, 3)
+    # Layer 1 (v6, NAR本命厳格): 火水木 + 6-12頭 + 5-8人気 + 旧強5会場 + 2-3一致
+    # clean 2ヶ月実績: n=145 / 回収率396.9% / Bootstrap CI下限225%
+    is_layer1_strict = (
+        is_nar
+        and cons_count in (2, 3)
         and cons_pop is not None
-        and 5 <= cons_pop <= 8
+        and LAYER1_POP_MIN <= cons_pop <= LAYER1_POP_MAX
+        and venue in OLD_STRONG5
+        and weekday in LAYER1_WEEKDAYS
+        and LAYER1_FIELD_MIN <= total_horses <= LAYER1_FIELD_MAX
     )
 
-    # v5: 信頼度・最高 (A3) — 強会場v4 + 6人気 + 2-3一致 (土日除外)
-    is_strict_v5 = (
-        is_nar
-        and cons_count in (2, 3)
-        and cons_pop == 6
-        and venue in GOLDEN_STRONG_VENUES_V4
-        and weekday < 5  # 土日除外 (Mon=0..Fri=4)
-    )
+    # Layer 2 (帯広中穴): 帯広 + 4エンジン top3 union から 人気5-10位馬
+    # clean 2ヶ月実績: 複勝131%(n=108) / ワイドBOX149%(n=89)
+    layer2_horses = []
+    if is_nar and venue in LAYER2_VENUES:
+        for h, vc in votes_t3.items():
+            pop = pop_rank_map.get(h)
+            if pop and LAYER2_POP_MIN <= pop <= LAYER2_POP_MAX:
+                layer2_horses.append({
+                    "horse_number": h,
+                    "horse_name": horse_map.get(h, ""),
+                    "popularity": pop,
+                    "vote_count": vc,
+                })
+        # vote_count 降順, popularity 昇順
+        layer2_horses.sort(key=lambda x: (-x["vote_count"], x["popularity"]))
+        layer2_horses = layer2_horses[:LAYER2_MAX_HORSES]
+    is_layer2_obihiro = bool(layer2_horses)
 
-    # v5: 信頼度・高 (A5) — 南関東4場 + 2-3一致 (人気不問、土日除外)
-    is_high_v5 = (
-        is_nar
-        and cons_count in (2, 3)
-        and venue in GOLDEN_SOUTH_NANKAN
-        and weekday < 5
-    )
+    # Layer 3 (JRA S級): 週末(土日)JRA 限定、3戦略
+    # - F5複勝対象: 3エンジン以上 top3 一致馬
+    # - U2馬連BOX3対象: 投票TOP3頭の組合せ (3点)
+    # - S1三連複1点対象: 投票TOP3頭の組合せ (1点)
+    layer3_f5_horses = []      # F5複勝対象馬リスト (3eng+一致)
+    layer3_top3_horses = []    # U2/S1対象 投票TOP3頭
+    is_jra_weekend = not is_nar and weekday in LAYER3_WEEKDAYS
+    if is_jra_weekend and votes_t3:
+        # F5: 3エンジン以上 top3 一致
+        for h, vc in votes_t3.items():
+            if vc >= LAYER3_MIN_T3_CONS:
+                layer3_f5_horses.append({
+                    "horse_number": h,
+                    "horse_name": horse_map.get(h, ""),
+                    "popularity": pop_rank_map.get(h),
+                    "vote_count": vc,
+                })
+        layer3_f5_horses.sort(key=lambda x: (-x["vote_count"], x.get("popularity") or 99))
 
-    # ピンポイント特異点 (TOP10、3軸組合せ)
-    pinpoint = _check_pinpoint(venue, cons_pop, cons_count) if (is_nar and weekday < 5) else None
+        # U2/S1: 投票TOP3頭 (vote降順, pop昇順)
+        ranked = sorted(votes_t3.items(),
+                       key=lambda x: (-x[1], pop_rank_map.get(x[0]) or 99, x[0]))
+        for h, vc in ranked[:LAYER3_T3_TOP_N]:
+            layer3_top3_horses.append({
+                "horse_number": h,
+                "horse_name": horse_map.get(h, ""),
+                "popularity": pop_rank_map.get(h),
+                "vote_count": vc,
+            })
+
+    is_layer3_jra_f5 = bool(layer3_f5_horses)
+    is_layer3_jra_combo = len(layer3_top3_horses) == LAYER3_T3_TOP_N
 
     return {
         "engine_picks": engine_picks,
@@ -305,10 +389,17 @@ def _evaluate_golden_pattern(race: dict, weekday: int) -> dict:
             "count": cons_count,
         },
         "popularity_rank": cons_pop,
-        "is_golden_loose": is_loose,           # v3互換
-        "is_golden_strict": is_strict_v5,      # v5: A3条件
-        "is_golden_high": is_high_v5,          # v5新規: A5条件
-        "pinpoint": pinpoint,                   # v5新規: TOP10特異点該当時のdict
+        "field_size": total_horses,
+        "is_golden_strict": is_layer1_strict,        # Layer 1 (v6): NAR本命厳格 単勝
+        "is_layer2_obihiro": is_layer2_obihiro,      # Layer 2: 帯広中穴 (複勝+ワイドBOX)
+        "obihiro_horses": layer2_horses,              # Layer 2 中穴馬リスト
+        "is_layer3_jra_f5": is_layer3_jra_f5,         # Layer 3: JRA F5複勝 (3eng+一致)
+        "is_layer3_jra_combo": is_layer3_jra_combo,  # Layer 3: JRA 馬連BOX3+三連複1点 (TOP3投票)
+        "jra_f5_horses": layer3_f5_horses,            # Layer 3 F5対象馬
+        "jra_top3_horses": layer3_top3_horses,        # Layer 3 馬連/三連複対象馬
+        "is_golden_high": False,                      # 旧 v5 互換 (deprecated)
+        "is_golden_loose": False,                     # 旧 v3 互換 (deprecated)
+        "pinpoint": None,                              # 旧 v5 ピンポイント (deprecated, 汚染データ由来)
     }
 
 
@@ -369,9 +460,16 @@ def get_golden_pattern_today():
         "loose_finished": 0, "strict_finished": 0,
         "loose_hits": 0, "strict_hits": 0,
         "loose_profit": 0, "strict_profit": 0,
-        # v5 fields
+        # v5 fields (deprecated)
         "high_golden": 0, "high_finished": 0, "high_hits": 0, "high_profit": 0,
         "pinpoint_golden": 0, "pinpoint_finished": 0, "pinpoint_hits": 0, "pinpoint_profit": 0,
+        # Layer 2 (帯広中穴)
+        "obihiro_golden": 0, "obihiro_horses_total": 0,
+        "obihiro_finished": 0, "obihiro_place_hits": 0,
+        # Layer 3 (JRA S級)
+        "jra_f5_golden": 0, "jra_f5_horses_total": 0,
+        "jra_f5_finished": 0, "jra_f5_place_hits": 0,
+        "jra_combo_golden": 0, "jra_combo_finished": 0, "jra_combo_hits": 0,
     }
 
     for r in races:
@@ -381,10 +479,19 @@ def get_golden_pattern_today():
         is_strict = eval_result["is_golden_strict"]
         is_high = eval_result.get("is_golden_high", False)
         is_pinpoint = eval_result.get("pinpoint") is not None
+        is_obihiro = eval_result.get("is_layer2_obihiro", False)
         if is_loose: summary["loose_golden"] += 1
         if is_strict: summary["strict_golden"] += 1
         if is_high: summary["high_golden"] += 1
         if is_pinpoint: summary["pinpoint_golden"] += 1
+        if is_obihiro:
+            summary["obihiro_golden"] += 1
+            summary["obihiro_horses_total"] += len(eval_result.get("obihiro_horses", []))
+        if eval_result.get("is_layer3_jra_f5"):
+            summary["jra_f5_golden"] += 1
+            summary["jra_f5_horses_total"] += len(eval_result.get("jra_f5_horses", []))
+        if eval_result.get("is_layer3_jra_combo"):
+            summary["jra_combo_golden"] += 1
 
         race_result = _build_race_result(eval_result, results_by_id.get(r.get("race_id", "")))
         if race_result and is_loose:
@@ -411,6 +518,23 @@ def get_golden_pattern_today():
                 summary["pinpoint_hits"] += 1
             if race_result.get("profit_yen") is not None:
                 summary["pinpoint_profit"] += race_result["profit_yen"]
+        # Layer 2 obihiro outcome tracking
+        if race_result and is_obihiro:
+            for oc in (race_result.get("obihiro_outcomes") or []):
+                summary["obihiro_finished"] += 1
+                if oc.get("placed"):
+                    summary["obihiro_place_hits"] += 1
+        # Layer 3 F5 outcome tracking
+        if race_result and eval_result.get("is_layer3_jra_f5"):
+            for oc in (race_result.get("f5_outcomes") or []):
+                summary["jra_f5_finished"] += 1
+                if oc.get("placed"):
+                    summary["jra_f5_place_hits"] += 1
+        # Layer 3 combo outcome tracking
+        if race_result and eval_result.get("is_layer3_jra_combo"):
+            summary["jra_combo_finished"] += 1
+            if race_result.get("l3_combo_hit"):
+                summary["jra_combo_hits"] += 1
 
         enriched.append({
             "race_id": r.get("race_id", ""),

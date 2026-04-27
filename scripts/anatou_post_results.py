@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""競馬GANTZ: 23:00 本日の戦果報告 v5 — 3層 (ピンポイント / 最高 / 高) 対応."""
+"""競馬GANTZ: 23:00 戦果報告 v6 — Layer 1 (NAR本命厳格) のみ.
+
+100円単位で正直に当落報告。当たっても外れても全レース結果を公開。
+"""
 import logging
 import os
 import sys
@@ -14,19 +17,19 @@ from anatou_telegram_lib import (
 logger = setup_logging()
 
 
-def _race_outcome_line(r: dict, prefix: str = "") -> list:
-    """1レース分の結果行を生成."""
+def _race_outcome_line(r: dict) -> list:
     cons = r.get("consensus") or {}
     venue = r.get("venue", "")
     rn = r.get("race_number", 0)
     cons_horse = cons.get("horse_number", "?")
     cons_name = cons.get("horse_name", "?")
+    pop = r.get("popularity_rank")
+    pop_str = f"{pop}人気" if pop else "?"
     result = r.get("result")
 
-    lines = [f"{prefix}📍 <b>{venue} {rn}R</b> ◎{cons_horse}.{cons_name}"]
+    head = f"📍 <b>{venue} {rn}R</b> ◎{cons_horse}.{cons_name} ({pop_str})"
     if not result:
-        lines.append(f"{prefix}   → ⏳ 結果 未確定")
-        return lines
+        return [head, "   → ⏳ 結果 未確定"]
 
     winner = result.get("winner_number")
     payout = result.get("win_payout") or 0
@@ -39,120 +42,166 @@ def _race_outcome_line(r: dict, prefix: str = "") -> list:
             break
 
     if won:
-        lines.append(f"{prefix}   → 1着: <b>{winner}番 {winner_name}</b>  単勝 <b>¥{payout:,}</b>  🎯 <b>撃破!</b>")
-    else:
-        lines.append(f"{prefix}   → 1着: {winner}番 {winner_name}  ✗ 失敗")
+        return [head, f"   → 1着: <b>{winner}番 {winner_name}</b>  単勝 <b>¥{payout:,}</b>  🎯 <b>撃破!</b>"]
+    return [head, f"   → 1着: {winner}番 {winner_name}  ✗ 失敗"]
+
+
+def format_silence_results(today: str) -> str:
+    return "\n".join([
+        f"🌙 <b>{today} 戦果報告</b>",
+        "",
+        "本日 は 任務 が あり ま せん で した。",
+        "",
+        "条件 厳格 で だす。",
+        "該当 し ない 日 こそ 規律 で だす。",
+    ])
+
+
+def _obihiro_result_lines(races: list) -> list:
+    """Layer 2 (帯広中穴) の結果行を生成。"""
+    lines = []
+    for r in sorted(races, key=lambda x: (x.get("start_time") or "99")):
+        rn = r.get("race_number", 0)
+        result = r.get("result") or {}
+        top3_list = result.get("top3") or []
+        top3_nums = [t.get("horse_number") for t in top3_list]
+        obihiro_outcomes = result.get("obihiro_outcomes") or []
+
+        lines.append(f"📍 <b>帯広 {rn}R</b>")
+        if not result:
+            lines.append("   → ⏳ 結果 未確定")
+            continue
+        for oc in obihiro_outcomes:
+            hn = oc.get("horse_number", "?")
+            placed = oc.get("placed", False)
+            fp = oc.get("fukusho_payout") or 0
+            if placed:
+                payout_str = f" 複勝 ¥{fp:,}" if fp else " 複勝 ✓(払戻額不明)"
+                lines.append(f"   🐴 <b>{hn}番</b> → 3着内入着{payout_str} ✅")
+            else:
+                lines.append(f"   🐴 <b>{hn}番</b> → 着外 ✗")
     return lines
 
 
-def format_v5_results(data: dict) -> str:
-    races = data.get("races", []) or []
-    pinpoint_races = [r for r in races if r.get("pinpoint")]
-    strict_races = [r for r in races if r.get("is_golden_strict")]
-    high_races = [r for r in races if r.get("is_golden_high")]
+def _jra_result_lines(races: list) -> list:
+    """Layer 3 (JRA S級) の結果行を生成。"""
+    lines = []
+    for r in sorted(races, key=lambda x: (x.get("start_time") or "99")):
+        venue = r.get("venue", "")
+        rn = r.get("race_number", 0)
+        result = r.get("result") or {}
+        f5_outcomes = result.get("f5_outcomes") or []
+        l3_combo_hit = result.get("l3_combo_hit", False)
+        top3_list = result.get("top3") or []
 
-    if not pinpoint_races and not strict_races and not high_races:
-        return ""  # 沈黙
+        lines.append(f"📍 <b>{venue} {rn}R</b>")
+        if not result:
+            lines.append("   → ⏳ 結果 未確定")
+            continue
+
+        # F5複勝
+        for oc in f5_outcomes:
+            hn = oc.get("horse_number", "?")
+            placed = oc.get("placed", False)
+            fp = oc.get("fukusho_payout") or 0
+            if placed:
+                payout_str = f" 複勝 ¥{fp:,}" if fp else " 複勝 ✓"
+                lines.append(f"   💎 F5 <b>{hn}番</b>{payout_str} ✅")
+            else:
+                lines.append(f"   💎 F5 <b>{hn}番</b> → 着外 ✗")
+
+        # U2/S1
+        top3_nums = [str(t.get("horse_number", "")) for t in top3_list[:3]]
+        combo_str = "-".join(top3_nums) if top3_nums else "?"
+        if l3_combo_hit:
+            lines.append(f"   🎯 U2/S1 {combo_str} → 三連複 的中 ✅")
+        else:
+            actual = "-".join(str(t.get("horse_number", "?")) for t in top3_list[:3]) if top3_list else "?"
+            lines.append(f"   🎯 U2/S1 → 外れ (実際の1-3着: {actual})")
+    return lines
+
+
+def format_v6_results(data: dict) -> str:
+    races = data.get("races", []) or []
+    strict_races = [r for r in races if r.get("is_golden_strict")]
+    obihiro_races = [r for r in races if r.get("is_layer2_obihiro")]
+    jra_races = [r for r in races if r.get("is_layer3_jra_f5") or r.get("is_layer3_jra_combo")]
 
     today = date_display(data.get("date", ""))
-    summary = data.get("summary") or {}
 
-    pp_finished = summary.get("pinpoint_finished", 0)
-    pp_hits = summary.get("pinpoint_hits", 0)
-    pp_profit = summary.get("pinpoint_profit", 0)
+    if not strict_races and not obihiro_races and not jra_races:
+        return format_silence_results(today)
+
+    summary = data.get("summary") or {}
     s_finished = summary.get("strict_finished", 0)
     s_hits = summary.get("strict_hits", 0)
     s_profit = summary.get("strict_profit", 0)
-    h_finished = summary.get("high_finished", 0)
-    h_hits = summary.get("high_hits", 0)
-    h_profit = summary.get("high_profit", 0)
 
     lines = [
-        f"🌙 <b>本日の戦果報告</b> ({today})",
+        f"🌙 <b>{today} 戦果報告</b>",
         "<b>━━━━━━━━━━━━━━</b>",
         "",
     ]
 
-    pinpoint_ids = {r.get("race_id") for r in pinpoint_races}
-    strict_ids = {r.get("race_id") for r in strict_races}
-
-    # 1. Pinpoint (個別)
-    if pinpoint_races:
-        lines.append("🌟 <b>ピンポイント特異点</b>")
-        for r in sorted(pinpoint_races, key=lambda x: (x.get("start_time") or "99", x.get("venue",""))):
+    # Layer 1
+    if strict_races:
+        lines.append("🎯 <b>Layer 1 — NAR本命厳格 結果</b>")
+        lines.append("")
+        for r in sorted(strict_races, key=lambda x: (x.get("start_time") or "99", x.get("venue", ""))):
             lines.extend(_race_outcome_line(r))
         lines.append("")
-
-    # 2. Strict 個別 (ピンポイント除外)
-    s_only = [r for r in strict_races if r.get("race_id") not in pinpoint_ids]
-    if s_only:
-        lines.append("🚀 <b>信頼度・最高</b>")
-        for r in sorted(s_only, key=lambda x: (x.get("start_time") or "99", x.get("venue",""))):
-            lines.extend(_race_outcome_line(r))
-        lines.append("")
-
-    # 3. High サマリ (重複除外)
-    h_only = [r for r in high_races if r.get("race_id") not in (pinpoint_ids | strict_ids)]
-    if h_only:
-        h_only_hits = sum(1 for r in h_only if r.get("result") and r["result"].get("did_consensus_win"))
-        h_only_payout = sum(
-            (r["result"].get("win_payout") or 0)
-            for r in h_only
-            if r.get("result") and r["result"].get("did_consensus_win")
-        )
-        h_only_invest = len(h_only) * 100
-        h_only_profit = h_only_payout - h_only_invest
-        lines.append(f"✅ <b>信頼度・高 (サマリ)</b>")
-        lines.append(f"   {len(h_only)}レース → {h_only_hits}撃破 / 収支 <b>¥{h_only_profit:+,}</b>")
-        # 当たったやつだけ抜粋表示
-        winners = [r for r in h_only if r.get("result") and r["result"].get("did_consensus_win")]
-        if winners:
-            lines.append("   🎯 撃破レース:")
-            for r in sorted(winners, key=lambda x: x.get("venue","")):
-                cons = r.get("consensus") or {}
-                payout = r["result"].get("win_payout") or 0
-                lines.append(f"     - {r.get('venue','')} {r.get('race_number',0)}R "
-                             f"◎{cons.get('horse_number','?')}.{cons.get('horse_name','?')} → ¥{payout:,}")
-        lines.append("")
-
-    # Summary
-    total_invest = (pp_finished + s_finished + h_finished) * 100
-    total_payout = total_invest + pp_profit + s_profit + h_profit
-    total_hits = pp_hits + s_hits + h_hits
-    total_finished = pp_finished + s_finished + h_finished
-    total_profit = pp_profit + s_profit + h_profit
-
-    lines.append("<b>━━━━━━━━━━━━━━</b>")
-    lines.append("📊 <b>本日の 採点 (ちいてん)</b>")
-    if pp_finished:
-        sign = "+" if pp_profit >= 0 else ""
-        lines.append(f"  🌟 ピンポイント: {pp_finished}R / {pp_hits}撃破 / <b>¥{sign}{pp_profit:,}</b>")
-    if s_finished:
+        invest = s_finished * 100
+        payout = invest + s_profit
         sign = "+" if s_profit >= 0 else ""
-        lines.append(f"  🚀 最高: {s_finished}R / {s_hits}撃破 / <b>¥{sign}{s_profit:,}</b>")
-    if h_finished:
-        sign = "+" if h_profit >= 0 else ""
-        lines.append(f"  ✅ 高:   {h_finished}R / {h_hits}撃破 / <b>¥{sign}{h_profit:,}</b>")
-    lines.append(f"  ━━━━━━━━━")
-    sign = "+" if total_profit >= 0 else ""
-    emoji = "✨" if total_profit > 0 else ("💧" if total_profit < 0 else "")
-    lines.append(f"  合計: {total_finished}R / {total_hits}撃破 / 収支 <b>¥{sign}{total_profit:,}</b> {emoji}")
-    lines.append("")
+        emoji = "✨" if s_profit > 0 else ("💧" if s_profit < 0 else "")
+        lines.append(f"  ターゲット: {s_finished}件 / 撃破: {s_hits}件")
+        lines.append(f"  収支: <b>¥{sign}{s_profit:,}</b> (投資¥{invest:,}→払戻¥{payout:,}) {emoji}")
+        lines.append("")
 
-    if total_profit > 0:
-        if total_hits == 1:
-            lines.append("ほとんど 外し まちた。")
-            lines.append("だが 1ターゲット で 全額 回収。")
-            lines.append("仕様 通り の 結果 で だす。")
-        elif total_hits >= 2:
-            lines.append("複数 撃破。良い 仕事 で だす。")
+    # Layer 2 (帯広中穴)
+    if obihiro_races:
+        lines.append("<b>━━━━━━━━━━━━━━</b>")
+        lines.append("🟣 <b>Layer 2 — 帯広中穴 結果</b>")
+        lines.append("")
+        lines.extend(_obihiro_result_lines(obihiro_races))
+        ob_finished = summary.get("obihiro_finished", 0)
+        ob_hits = summary.get("obihiro_place_hits", 0)
+        if ob_finished:
+            lines.append(f"  複勝: {ob_finished}頭 / 入着: {ob_hits}頭")
+        lines.append("")
+
+    # Layer 3 (JRA S級)
+    if jra_races:
+        lines.append("<b>━━━━━━━━━━━━━━</b>")
+        lines.append("🔵 <b>Layer 3 — JRA S級 結果</b>")
+        lines.append("")
+        lines.extend(_jra_result_lines(jra_races))
+        f5_finished = summary.get("jra_f5_finished", 0)
+        f5_hits = summary.get("jra_f5_place_hits", 0)
+        combo_finished = summary.get("jra_combo_finished", 0)
+        combo_hits = summary.get("jra_combo_hits", 0)
+        if f5_finished:
+            lines.append(f"  F5複勝: {f5_finished}頭 / 入着: {f5_hits}頭")
+        if combo_finished:
+            lines.append(f"  U2/S1: {combo_finished}レース / 三連複的中: {combo_hits}レース")
+        lines.append("")
+
+    # 総括コメント (Layer 1 のみ)
+    if strict_races:
+        lines.append("<b>━━━━━━━━━━━━━━</b>")
+        if s_profit > 0:
+            if s_hits == 1:
+                lines.append("ほとんど 外し まちた。")
+                lines.append("だが 1ターゲット で 全額 回収。")
+            elif s_hits >= 2:
+                lines.append("複数 撃破。良い 仕事 で だす。")
+            else:
+                lines.append("プラス で 終了。")
+        elif s_profit < 0:
+            lines.append("今日 は 失敗 の 日 で だす。")
+            lines.append("撃破 する 日 の ため に 続けて くだちい。")
         else:
-            lines.append("プラス で 終了。")
-    elif total_profit < 0:
-        lines.append("今日 は 失敗 の 日 で だす。")
-        lines.append("撃破 する 日 の ため に 続けて くだちい。")
-    else:
-        lines.append("ちょうど ±0 で だす。")
+            lines.append("ちょうど ±0 で だす。")
 
     return "\n".join(lines)
 
@@ -164,19 +213,19 @@ def main():
         logger.error("no data")
         return 1
 
-    msg = format_v5_results(data)
-    if not msg:
-        logger.info("no signals today — silent")
-        return 0
-
+    msg = format_v6_results(data)
     ok = send_telegram(msg)
-    logger.info(f"results v5 sent={ok}")
+    logger.info(f"results v6 sent={ok}")
     return 0 if ok else 1
 
 
 # Backward compatibility
 def format_results(data: dict) -> str:
-    return format_v5_results(data)
+    return format_v6_results(data)
+
+
+def format_v5_results(data: dict) -> str:
+    return format_v6_results(data)
 
 
 if __name__ == "__main__":

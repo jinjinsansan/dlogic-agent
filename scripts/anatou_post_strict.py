@@ -1,81 +1,81 @@
 #!/usr/bin/env python3
-"""競馬GANTZ: 09:00 任務指令 v5 — 3層運用 (ピンポイント特異点 / 信頼度・最高 / 信頼度・高)."""
+"""競馬GANTZ: 09:00 任務指令 v6 — Layer 1 (NAR本命厳格).
+
+条件: NAR + 火水木 + 旧強5会場 + 6-12頭 + 5-8人気 + 2-3エンジン一致 → 単勝
+clean 2ヶ月実績 (n=145): 回収率 396.9% / Bootstrap CI 95%下限 225%
+"""
 import logging
 import os
 import sys
-from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from anatou_telegram_lib import (
     fetch_pattern, send_telegram,
     date_yyyymmdd_today, date_display,
-    setup_logging, JST,
+    setup_logging,
 )
 
 logger = setup_logging()
 
 
 def format_silence(today: str, weekday: str) -> str:
+    if weekday in ("土", "日"):
+        return "\n".join([
+            f"🌑 <b>{today}</b>",
+            "",
+            "玉 は 静か で だす。",
+            "本日 任務 は あり ま せん。",
+            "",
+            f"<b>{weekday}曜</b> は 玉 が 動か ない 日 で だす。",
+            "本物 の 仕事 は 火水木 のみ で だす。",
+            "",
+            "それ が 競馬GANTZ の 仕様 で だす。",
+        ])
+    if weekday == "月":
+        return "\n".join([
+            f"🌑 <b>{today}</b>",
+            "",
+            "玉 は 静か で だす。",
+            "本日 任務 は あり ま せん。",
+            "",
+            "<b>月曜</b> は 玉 が 動か ない 日 で だす。",
+            "本物 の 仕事 は 火水木 で 動き まち。",
+            "",
+            "明日 から 任務 始まる かも しれ まち。",
+        ])
+    if weekday == "金":
+        return "\n".join([
+            f"🌑 <b>{today}</b>",
+            "",
+            "玉 は 静か で だす。",
+            "本日 任務 は あり ま せん。",
+            "",
+            "<b>金曜</b> は 玉 が 動か ない 日 で だす。",
+            "本物 の 仕事 は 火水木 のみ で だす。",
+        ])
+    # 火水木 で該当無し
     return "\n".join([
         f"🌑 <b>{today}</b>",
         "",
-        "玉 は 静か で だす。",
-        "本日 任務 は あり ま せん。",
+        "玉 は 動か なかった で だす。",
+        "本日 該当 ターゲット 無し で 沈黙 で だす。",
         "",
-        f"<b>{weekday}曜</b> は 玉 が 動か ない 日 で だす。",
-        "仕事 は 月曜 から 再開 し まち。",
-        "",
-        "ほとんど の 日 は 仕事 が 来ない。",
-        "来た 日 は 必ず 仕事 を 受けて くだちい。",
-        "",
-        "それ が 競馬GANTZ の 仕様 で だす。",
+        "条件: <b>火水木 + 旧強5会場 + 6-12頭 + 5-8人気 + 2-3 一致</b>",
+        "厳格 で だす。 該当 し ない 日 が 普通 で だす。",
     ])
 
 
-def format_pinpoint_section(pinpoint_races: list) -> str:
-    """ピンポイント特異点セクション (該当レースのみ、3軸で recov>=200%)."""
-    if not pinpoint_races:
-        return ""
+def format_strict_section(strict_races: list) -> str:
+    """Layer 1 (NAR本命厳格) ターゲット一覧."""
     lines = [
-        "🌟🌟🌟 <b>ピンポイント特異点 出現</b> 🌟🌟🌟",
+        "🔥🔥🔥 <b>Layer 1 — 本命厳格 (旧強5会場)</b> 🔥🔥🔥",
         "<b>━━━━━━━━━━━━━━━━━━</b>",
-        "<b>過去1年で200%超の超特殊条件、本日該当!</b>",
+        "🚨 全ターゲット <b>単勝100円</b>",
+        "<i>過去2ヶ月: 回収率396.9% / CI下限225%</i>",
         "<b>━━━━━━━━━━━━━━━━━━</b>",
         "",
     ]
-    pp_sorted = sorted(pinpoint_races, key=lambda r: r.get("start_time") or "99:99")
-    for r in pp_sorted:
-        cons = r.get("consensus") or {}
-        pp = r.get("pinpoint") or {}
-        time_str = r.get("start_time") or "—"
-        venue = r.get("venue", "")
-        rn = r.get("race_number", 0)
-        hn = cons.get("horse_number", "?")
-        name = cons.get("horse_name", "?")
-
-        lines.append(f"📍 <b>{venue} {rn}R</b>  ⏰ <b>{time_str}</b>")
-        lines.append(f"🐎 <b>{hn}番 {name}</b>")
-        lines.append(f"🎯 武器: <b>単勝 {hn}</b>")
-        lines.append(f"⚡ <b>{pp.get('venue')} × {pp.get('pop')}人気 × {pp.get('cons')}/4一致</b>")
-        lines.append(f"   過去 {pp.get('n')}R 回収率 <b>{pp.get('recov')}%</b>")
-        lines.append("")
-
-    return "\n".join(lines)
-
-
-def format_strict_section(strict_races: list, exclude_ids: set) -> str:
-    """信頼度・最高 (A3) セクション. ピンポイントとの重複は除外."""
-    races = [r for r in strict_races if r.get("race_id") not in exclude_ids]
-    if not races:
-        return ""
-    lines = [
-        "🔥🔥🔥 <b>信頼度・最高 任務</b> 🔥🔥🔥",
-        "<b>━━━━━━━━━━━━━━━━━━</b>",
-        "🚨 全ターゲット <b>単勝100円</b> で買って くだちい",
-        "<b>━━━━━━━━━━━━━━━━━━</b>",
-        "",
-    ]
-    s_sorted = sorted(races, key=lambda r: r.get("start_time") or "99:99")
+    s_sorted = sorted(strict_races, key=lambda r: r.get("start_time") or "99:99")
     for i, r in enumerate(s_sorted, 1):
         cons = r.get("consensus") or {}
         time_str = r.get("start_time") or "—"
@@ -83,102 +83,133 @@ def format_strict_section(strict_races: list, exclude_ids: set) -> str:
         rn = r.get("race_number", 0)
         hn = cons.get("horse_number", "?")
         name = cons.get("horse_name", "?")
+        pop = r.get("popularity_rank")
+        pop_str = f"{pop}人気" if pop else "?"
+        cnt = cons.get("count", 0)
         lines.append(f"━ <b>ターゲット{i}</b> ━")
         lines.append(f"📍 <b>{venue} {rn}R</b>  ⏰ <b>{time_str}</b>")
-        lines.append(f"🐎 <b>{hn}番 {name}</b>")
+        lines.append(f"🐎 <b>{hn}番 {name}</b> ({pop_str})")
         lines.append(f"🎯 単勝 <b>{hn}</b>")
+        lines.append(f"🤝 一致 <b>{cnt}/4</b> エンジン")
         lines.append("")
 
     return "\n".join(lines)
 
 
-def format_high_section(high_races: list, exclude_ids: set) -> str:
-    """信頼度・高 (A5) セクション. ピンポイント・最高との重複は除外し、コンパクト表示."""
-    races = [r for r in high_races if r.get("race_id") not in exclude_ids]
-    if not races:
-        return ""
+def format_obihiro_section(obihiro_races: list) -> str:
+    """Layer 2 (帯広中穴) ターゲット一覧 — 複勝+ワイドBOX."""
+    from itertools import combinations
     lines = [
-        "✅ <b>信頼度・高 (参考、人気不問)</b>",
+        "🟣 <b>Layer 2 — 帯広中穴 (ばんえい)</b>",
         "<b>━━━━━━━━━━━━━━━━━━</b>",
-        "<i>南関東 (川崎/船橋/大井/浦和) で 2-3エンジン一致レース</i>",
-        "<i>1年実績 回収率 約141%</i>",
+        "<i>4エンジン top3 union × 人気5-10位 を 複勝+ワイドBOX</i>",
+        "<i>過去2ヶ月: 複勝131% / ワイドBOX149%</i>",
         "",
     ]
-    h_sorted = sorted(races, key=lambda r: r.get("start_time") or "99:99")
-    for r in h_sorted:
-        cons = r.get("consensus") or {}
-        pop = r.get("popularity_rank")
-        pop_str = f"{pop}人気" if pop else "?"
+    o_sorted = sorted(obihiro_races, key=lambda r: r.get("start_time") or "99:99")
+    for r in o_sorted:
         time_str = r.get("start_time") or "—"
-        venue = r.get("venue", "")
         rn = r.get("race_number", 0)
-        hn = cons.get("horse_number", "?")
-        name = cons.get("horse_name", "?")
-        lines.append(f"📍 {venue} {rn}R ⏰{time_str}  ◎{hn}.{name} ({pop_str})")
+        horses = r.get("obihiro_horses") or []
+        if not horses:
+            continue
+        nums = [str(h.get("horse_number")) for h in horses]
+        nums_disp = "/".join(nums)
+        lines.append(f"📍 <b>帯広 {rn}R</b>  ⏰ <b>{time_str}</b>")
+        for h in horses:
+            lines.append(
+                f"  🐴 <b>{h.get('horse_number','?')}番 {h.get('horse_name','?')}</b> "
+                f"({h.get('popularity','?')}人気) 一致{h.get('vote_count','?')}/4"
+            )
+        lines.append(f"  🎯 複勝: <b>各馬 100円</b> ({len(horses)}点)")
+        if len(horses) >= 2:
+            pair_disp = ", ".join(f"{a}-{b}" for a, b in combinations(nums, 2))
+            n_pairs = len(list(combinations(nums, 2)))
+            lines.append(f"  🎯 ワイドBOX: <b>{pair_disp}</b> 各100円 ({n_pairs}点)")
+        lines.append("")
 
     return "\n".join(lines)
 
 
-def format_v5(data: dict) -> str:
+def format_jra_section(jra_races: list) -> str:
+    """Layer 3 (JRA S級) ターゲット一覧 — 複勝+馬連BOX3+三連複1点."""
+    from itertools import combinations
+    lines = [
+        "🔵 <b>Layer 3 — JRA S級 (週末)</b>",
+        "<b>━━━━━━━━━━━━━━━━━━</b>",
+        "<i>4エンジン top3 投票合議の3戦略同時運用</i>",
+        "<i>過去2ヶ月: F5複勝131% / U2馬連326% / S1三連複837%</i>",
+        "",
+    ]
+    j_sorted = sorted(jra_races, key=lambda r: r.get("start_time") or "99:99")
+    for r in j_sorted:
+        time_str = r.get("start_time") or "—"
+        venue = r.get("venue", "")
+        rn = r.get("race_number", 0)
+        f5 = r.get("jra_f5_horses") or []
+        top3 = r.get("jra_top3_horses") or []
+
+        lines.append(f"📍 <b>{venue} {rn}R</b>  ⏰ <b>{time_str}</b>")
+        # F5複勝
+        if f5:
+            for h in f5:
+                lines.append(
+                    f"  💎 <b>F5複勝</b>: <b>{h.get('horse_number','?')}番 {h.get('horse_name','?')}</b> "
+                    f"({h.get('popularity','?')}人気) 一致{h.get('vote_count','?')}/4"
+                )
+        # U2/S1 共通 TOP3頭
+        if len(top3) == 3:
+            nums = [str(h.get("horse_number")) for h in top3]
+            names = [h.get("horse_name", "?") for h in top3]
+            disp = " / ".join(f"{n}.{nm[:8]}" for n, nm in zip(nums, names))
+            lines.append(f"  🎯 <b>U2馬連BOX3</b>: " + ", ".join(f"{a}-{b}" for a, b in combinations(nums, 2)))
+            lines.append(f"  🎯 <b>S1三連複1点</b>: {nums[0]}-{nums[1]}-{nums[2]} ({disp})")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def format_v6(data: dict) -> str:
     races = data.get("races", []) or []
     weekday = data.get("weekday", "?")
     today = date_display(data.get("date", ""))
 
-    pinpoint_races = [r for r in races if r.get("pinpoint")]
     strict_races = [r for r in races if r.get("is_golden_strict")]
-    high_races = [r for r in races if r.get("is_golden_high")]
+    obihiro_races = [r for r in races if r.get("is_layer2_obihiro")]
+    jra_races = [r for r in races
+                 if r.get("is_layer3_jra_f5") or r.get("is_layer3_jra_combo")]
 
-    if not pinpoint_races and not strict_races and not high_races:
-        # 土日 or 該当ナシ → 沈黙投稿
-        if weekday in ("土", "日"):
-            return format_silence(today, weekday)
-        return ""
+    if not strict_races and not obihiro_races and not jra_races:
+        return format_silence(today, weekday)
 
-    lines = [
-        f"☀️ <b>{today} 任務開始</b>",
+    lines = [f"☀️ <b>{today} 任務開始</b>", ""]
+    if strict_races:
+        lines.append(format_strict_section(strict_races))
+    if obihiro_races:
+        if strict_races: lines.append("")
+        lines.append(format_obihiro_section(obihiro_races))
+    if jra_races:
+        if strict_races or obihiro_races: lines.append("")
+        lines.append(format_jra_section(jra_races))
+
+    lines.extend([
+        "<b>━━━━━━━━━━━━━━━━━━</b>",
+        "💎 <b>運用ルール</b>",
+        "・全ターゲット <b>各100円</b>",
+        "・絞らない、外しても続ける",
+        "・ほとんど 失敗 し まち",
+        '・"1点で 全額 回収" が 仕様 で だす',
         "",
-    ]
-
-    pinpoint_ids = {r.get("race_id") for r in pinpoint_races}
-    strict_ids = {r.get("race_id") for r in strict_races}
-
-    # 1. Pinpoint
-    pp_section = format_pinpoint_section(pinpoint_races)
-    if pp_section:
-        lines.append(pp_section)
-
-    # 2. Strict (excluding pinpoint)
-    s_section = format_strict_section(strict_races, exclude_ids=pinpoint_ids)
-    if s_section:
-        if pp_section: lines.append("")
-        lines.append(s_section)
-
-    # 3. High (excluding pinpoint and strict)
-    excluded = pinpoint_ids | strict_ids
-    h_section = format_high_section(high_races, exclude_ids=excluded)
-    if h_section:
-        if pp_section or s_section: lines.append("")
-        lines.append(h_section)
-
-    # Footer
-    lines.append("")
-    lines.append("<b>━━━━━━━━━━━━━━━━━━</b>")
-    lines.append("💎 <b>運用ルール</b>")
-    lines.append("・🌟 ピンポイント = <b>最優先</b>、必ず買う")
-    lines.append("・🚀 信頼度・最高 = 全部 100円ずつ単勝")
-    lines.append("・✅ 信頼度・高 = 参考、買えるだけ")
-    lines.append("・絞らない、外しても続ける")
-    lines.append("")
-    lines.append("🔥 <b>仕様</b>")
-    lines.append("ほとんど 失敗 し まち。")
-    lines.append("だが <b>1〜2 撃破 で 全体 プラス</b>。")
-    lines.append('"1点で 全額 回収" が 競馬GANTZ で だす。')
-    lines.append("")
-    lines.append("📊 <b>1年実績 (NAR 13,529レース)</b>")
-    lines.append("🚀 信頼度・最高 (255R): 回収率 <b>320.6%</b> / 利益 +¥56,250")
-    lines.append("✅ 信頼度・高 (2,591R): 回収率 <b>141.1%</b> / 利益 +¥106,470")
-    lines.append("🌟 ピンポイント: 回収率 <b>200-505%</b>")
-
+        "📊 <b>過去2ヶ月 実績 (clean, leakage除去)</b>",
+        "・<b>Layer 1</b> NAR本命厳格 単勝: 396.9% / CI下限225% / n=145",
+        "・<b>Layer 2</b> 帯広中穴 複勝: 131% / n=108",
+        "・<b>Layer 2</b> 帯広中穴 ワイドBOX: 149% / n=89",
+        "・<b>Layer 3</b> JRA F5複勝: 131% / CI下限118% / n=590",
+        "・<b>Layer 3</b> JRA U2馬連BOX3: 326% / CI下限213% / n=1116",
+        "・<b>Layer 3</b> JRA S1三連複1点: 837% / CI下限231% / n=372",
+        "",
+        "<i>毎日 結果 を 正直 に 公開 し まち</i>",
+    ])
     return "\n".join(lines)
 
 
@@ -189,20 +220,23 @@ def main():
         logger.error("no data")
         return 1
 
-    msg = format_v5(data)
+    msg = format_v6(data)
     if not msg:
         logger.info("no signals — silent")
         return 0
 
     ok = send_telegram(msg)
-    logger.info(f"v5 sent={ok}")
+    logger.info(f"v6 sent={ok}")
     return 0 if ok else 1
 
 
-# Backwards compatibility
+# Backwards compatibility (old timer references)
 def format_strict(data: dict) -> str:
-    """旧 format_strict の互換シム (v5 を呼ぶ)."""
-    return format_v5(data)
+    return format_v6(data)
+
+
+def format_v5(data: dict) -> str:
+    return format_v6(data)
 
 
 if __name__ == "__main__":
