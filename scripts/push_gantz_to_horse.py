@@ -388,7 +388,8 @@ def main() -> int:
         logger.info("--include-loose active: strict+loose races included for L1")
     else:
         layer1_targets = [r for r in races if r.get("is_golden_strict")]
-    layer2_targets = [r for r in races if r.get("is_layer2_obihiro")]
+    # Layer 2 (帯広) は 2026-04-27 無効化 — ばんえい未学習エンジンの偶然数字とみなし配信除外
+    layer2_targets: list = []  # [r for r in races if r.get("is_layer2_obihiro")]
     layer3_targets = [r for r in races
                       if r.get("is_layer3_jra_f5") or r.get("is_layer3_jra_combo")]
 

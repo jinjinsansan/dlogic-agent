@@ -175,7 +175,8 @@ def format_v6(data: dict) -> str:
     today = date_display(data.get("date", ""))
 
     strict_races = [r for r in races if r.get("is_golden_strict")]
-    obihiro_races = [r for r in races if r.get("is_layer2_obihiro")]
+    # Layer 2 (帯広) は 2026-04-27 無効化 — ばんえい未学習エンジンの偶然数字とみなし配信除外
+    obihiro_races: list = []  # [r for r in races if r.get("is_layer2_obihiro")]
     jra_races = [r for r in races
                  if r.get("is_layer3_jra_f5") or r.get("is_layer3_jra_combo")]
 
@@ -202,8 +203,6 @@ def format_v6(data: dict) -> str:
         "",
         "📊 <b>過去2ヶ月 実績 (clean, leakage除去)</b>",
         "・<b>Layer 1</b> NAR本命厳格 単勝: 396.9% / CI下限225% / n=145",
-        "・<b>Layer 2</b> 帯広中穴 複勝: 131% / n=108",
-        "・<b>Layer 2</b> 帯広中穴 ワイドBOX: 149% / n=89",
         "・<b>Layer 3</b> JRA F5複勝: 131% / CI下限118% / n=590",
         "・<b>Layer 3</b> JRA U2馬連BOX3: 326% / CI下限213% / n=1116",
         "・<b>Layer 3</b> JRA S1三連複1点: 837% / CI下限231% / n=372",

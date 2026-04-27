@@ -124,7 +124,8 @@ def _jra_result_lines(races: list) -> list:
 def format_v6_results(data: dict) -> str:
     races = data.get("races", []) or []
     strict_races = [r for r in races if r.get("is_golden_strict")]
-    obihiro_races = [r for r in races if r.get("is_layer2_obihiro")]
+    # Layer 2 (帯広) は 2026-04-27 無効化
+    obihiro_races: list = []  # [r for r in races if r.get("is_layer2_obihiro")]
     jra_races = [r for r in races if r.get("is_layer3_jra_f5") or r.get("is_layer3_jra_combo")]
 
     today = date_display(data.get("date", ""))

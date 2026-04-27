@@ -311,14 +311,14 @@ def main():
     else:
         results.append(f"明後日NAR: 未掲載")
 
-    # 帯広(ばんえい)の odds + start_time を keiba.go.jp から取得して埋める
-    # netkeibaが帯広に未対応のため、prefetch直後に enrichment が必要
-    logger.info("\n[帯広odds enrich]")
-    for f in files_to_upload:
-        # ファイル名から日付抽出 (races_YYYYMMDD.json)
-        m = re.search(r'races_(\d{8})\.json$', f)
-        if m:
-            enrich_banei_odds(f, m.group(1), logger)
+    # 帯広(ばんえい)の odds + start_time enrichment は 2026-04-27 無効化
+    # 理由: Layer 2 (帯広中穴) を配信から除外したため、odds 取得不要
+    # 再有効化はこのブロックのコメントを外す + api/data_api.py の LAYER2_ENABLED=True
+    # logger.info("\n[帯広odds enrich]")
+    # for f in files_to_upload:
+    #     m = re.search(r'races_(\d{8})\.json$', f)
+    #     if m:
+    #         enrich_banei_odds(f, m.group(1), logger)
 
     # R2アップロード（ビューア用）
     logger.info("\n[R2 CDN]")

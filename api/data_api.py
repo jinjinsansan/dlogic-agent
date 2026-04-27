@@ -44,12 +44,17 @@ LAYER1_FIELD_MAX = 12
 LAYER1_POP_MIN = 5
 LAYER1_POP_MAX = 8
 
-# Layer 2 (帯広中穴): 4エンジン top3 union のうち人気5-10位馬を 複勝 + ワイドBOX
-# clean 2ヶ月実績: 複勝131%(n=108) / ワイドBOX149%(n=89)
+# Layer 2 (帯広中穴) — 2026-04-27 無効化
+# 理由: Dlogic 等のエンジンは ばんえい を学習データに含んでおらず、
+# clean 2ヶ月の数字 (複勝131%, ワイドBOX149%) は偶然の可能性大。
+# 平地競馬と物理的に異なる (馬力・斤量・脚質) ため、
+# 平地データ主体の現エンジンが ばんえい で機能する根拠が薄い。
+# データ蓄積後 (6ヶ月+) に再評価予定。
+LAYER2_ENABLED = False  # ← 再有効化はここを True に
 LAYER2_VENUES = {"帯広"}
 LAYER2_POP_MIN = 5
 LAYER2_POP_MAX = 10
-LAYER2_MAX_HORSES = 4  # ワイドBOX 4頭=6点まで
+LAYER2_MAX_HORSES = 4
 
 # Layer 3 (JRA S級): 週末 JRA 用。S級14戦略から 安定3戦略を選抜
 # - F5_3engT3合議の複勝 (n=590, 130.6%, CI下限118%) ← 安定運用
@@ -329,10 +334,10 @@ def _evaluate_golden_pattern(race: dict, weekday: int) -> dict:
         and LAYER1_FIELD_MIN <= total_horses <= LAYER1_FIELD_MAX
     )
 
-    # Layer 2 (帯広中穴): 帯広 + 4エンジン top3 union から 人気5-10位馬
-    # clean 2ヶ月実績: 複勝131%(n=108) / ワイドBOX149%(n=89)
+    # Layer 2 (帯広中穴): 2026-04-27 無効化 (LAYER2_ENABLED=False)
+    # ばんえい未学習エンジンによる偶発的数字とみなし、配信から除外
     layer2_horses = []
-    if is_nar and venue in LAYER2_VENUES:
+    if LAYER2_ENABLED and is_nar and venue in LAYER2_VENUES:
         for h, vc in votes_t3.items():
             pop = pop_rank_map.get(h)
             if pop and LAYER2_POP_MIN <= pop <= LAYER2_POP_MAX:
@@ -342,7 +347,6 @@ def _evaluate_golden_pattern(race: dict, weekday: int) -> dict:
                     "popularity": pop,
                     "vote_count": vc,
                 })
-        # vote_count 降順, popularity 昇順
         layer2_horses.sort(key=lambda x: (-x["vote_count"], x["popularity"]))
         layer2_horses = layer2_horses[:LAYER2_MAX_HORSES]
     is_layer2_obihiro = bool(layer2_horses)
