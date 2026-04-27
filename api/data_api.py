@@ -25,49 +25,49 @@ logger = logging.getLogger(__name__)
 
 bp = Blueprint("data_api", __name__, url_prefix="/api/data")
 
-# Golden pattern config (audit v2 + weekday_strict_search 2026-04-26)
-GOLDEN_BEST_VENUES = {"園田", "水沢", "高知", "笠松", "金沢"}
-GOLDEN_BEST_WEEKDAYS = {1, 2, 3}  # Tue=1, Wed=2, Thu=3 (Mon=0)
+# Golden pattern config v5 (engine_accuracy_audit_v5_FINAL_20260427.md, 1年・13,529R根拠)
+# v3まで使われていた "強5会場" は長期データで弱いと判明、新v4強会場に置換
+# v3 weekday別暫定厳格は廃止、月-金一律で配信 (土日のみ沈黙)
+GOLDEN_STRONG_VENUES_V4 = {"川崎", "船橋", "大井", "浦和", "門別", "笠松"}
+GOLDEN_SOUTH_NANKAN = {"川崎", "船橋", "大井", "浦和"}
 GOLDEN_ENGINE_KEYS = ["Dlogic", "Ilogic", "ViewLogic", "MetaLogic"]
 
-# Per-weekday strict patterns (Mon=0, Tue=1, Wed=2, Thu=3, Fri=4, Sat=5, Sun=6)
-# Each pattern requires: is_nar=True + cons_count in (2,3) + pop_rank in allowed buckets
-# Sat(5)/Sun(6) → no strict (all-loss territory in current data)
-GOLDEN_PER_WEEKDAY = {
-    0: {  # Mon: 1人気 or 6-8人気
-        "name": "月",
-        "pop_buckets": {1, 6, 7, 8},
-        "venues": None,  # 全NAR会場OK
-    },
-    1: {  # Tue: 火水木 classic strict (5強会場 + 6-12頭 + 5-8人気)
-        "name": "火",
-        "pop_buckets": {5, 6, 7, 8},
-        "venues": GOLDEN_BEST_VENUES,
-        "field_min": 6,
-        "field_max": 12,
-    },
-    2: {  # Wed: same
-        "name": "水",
-        "pop_buckets": {5, 6, 7, 8},
-        "venues": GOLDEN_BEST_VENUES,
-        "field_min": 6,
-        "field_max": 12,
-    },
-    3: {  # Thu: same (4-8人気拡張も検討余地あり)
-        "name": "木",
-        "pop_buckets": {5, 6, 7, 8},
-        "venues": GOLDEN_BEST_VENUES,
-        "field_min": 6,
-        "field_max": 12,
-    },
-    4: {  # Fri: 4-5人気
-        "name": "金",
-        "pop_buckets": {4, 5},
-        "venues": None,
-    },
-    5: None,  # Sat: 配信なし
-    6: None,  # Sun: 配信なし
-}
+# 旧v3定数 (互換のため残置、新コードでは使わない)
+GOLDEN_BEST_VENUES = {"園田", "水沢", "高知", "笠松", "金沢"}
+GOLDEN_BEST_WEEKDAYS = {1, 2, 3}
+
+# 3軸ピンポイント特異点 TOP10 (recov >= 200%, n >= 30)
+PINPOINT_PATTERNS = [
+    {"venue": "門別",   "pop": 6,  "cons": 3, "recov": 505, "n": 32},
+    {"venue": "高知",   "pop": 10, "cons": 3, "recov": 348, "n": 30},
+    {"venue": "笠松",   "pop": 6,  "cons": 2, "recov": 342, "n": 40},
+    {"venue": "笠松",   "pop": 6,  "cons": 3, "recov": 342, "n": 43},
+    {"venue": "浦和",   "pop": 4,  "cons": 2, "recov": 315, "n": 32},
+    {"venue": "大井",   "pop": 5,  "cons": 2, "recov": 266, "n": 35},
+    {"venue": "笠松",   "pop": 5,  "cons": 2, "recov": 251, "n": 39},
+    {"venue": "笠松",   "pop": 7,  "cons": 2, "recov": 244, "n": 40},
+    {"venue": "水沢",   "pop": 8,  "cons": 2, "recov": 242, "n": 37},
+    {"venue": "名古屋", "pop": 5,  "cons": 3, "recov": 207, "n": 51},
+]
+
+# 旧 GOLDEN_PER_WEEKDAY は v5 では未使用 (互換のため空dictで残置)
+GOLDEN_PER_WEEKDAY = {0: None, 1: None, 2: None, 3: None, 4: None, 5: None, 6: None}
+
+
+def _check_pinpoint(venue: str, pop_rank: int | None, cons_count: int) -> dict | None:
+    """3軸ピンポイント特異点に該当するか判定."""
+    if pop_rank is None:
+        return None
+    for pp in PINPOINT_PATTERNS:
+        if pp["venue"] == venue and pp["pop"] == pop_rank and pp["cons"] == cons_count:
+            return {
+                "venue": pp["venue"],
+                "pop": pp["pop"],
+                "cons": pp["cons"],
+                "recov": pp["recov"],
+                "n": pp["n"],
+            }
+    return None
 
 
 @bp.route("/races", methods=["GET"])
@@ -268,32 +268,33 @@ def _evaluate_golden_pattern(race: dict, weekday: int) -> dict:
     is_nar = bool(race.get("is_local"))
     venue = race.get("venue", "")
     total_horses = len(horse_numbers)
+
+    # 旧 v3互換 (ブランド移行期のため一時保持、新ロジックでは未使用)
     is_loose = (
         cons_count in (2, 3)
         and cons_pop is not None
         and 5 <= cons_pop <= 8
     )
-    # Per-weekday strict: each weekday has its own filter
-    is_strict = False
-    wd_pattern = GOLDEN_PER_WEEKDAY.get(weekday)
-    if (wd_pattern is not None
-            and is_nar
-            and cons_count in (2, 3)
-            and cons_pop is not None
-            and cons_pop in wd_pattern["pop_buckets"]):
-        # Optional venue filter
-        venue_ok = (wd_pattern.get("venues") is None
-                    or venue in wd_pattern["venues"])
-        # Optional field-size filter
-        field_min = wd_pattern.get("field_min")
-        field_max = wd_pattern.get("field_max")
-        field_ok = True
-        if field_min is not None and total_horses < field_min:
-            field_ok = False
-        if field_max is not None and total_horses > field_max:
-            field_ok = False
-        if venue_ok and field_ok:
-            is_strict = True
+
+    # v5: 信頼度・最高 (A3) — 強会場v4 + 6人気 + 2-3一致 (土日除外)
+    is_strict_v5 = (
+        is_nar
+        and cons_count in (2, 3)
+        and cons_pop == 6
+        and venue in GOLDEN_STRONG_VENUES_V4
+        and weekday < 5  # 土日除外 (Mon=0..Fri=4)
+    )
+
+    # v5: 信頼度・高 (A5) — 南関東4場 + 2-3一致 (人気不問、土日除外)
+    is_high_v5 = (
+        is_nar
+        and cons_count in (2, 3)
+        and venue in GOLDEN_SOUTH_NANKAN
+        and weekday < 5
+    )
+
+    # ピンポイント特異点 (TOP10、3軸組合せ)
+    pinpoint = _check_pinpoint(venue, cons_pop, cons_count) if (is_nar and weekday < 5) else None
 
     return {
         "engine_picks": engine_picks,
@@ -304,8 +305,10 @@ def _evaluate_golden_pattern(race: dict, weekday: int) -> dict:
             "count": cons_count,
         },
         "popularity_rank": cons_pop,
-        "is_golden_loose": is_loose,
-        "is_golden_strict": is_strict,
+        "is_golden_loose": is_loose,           # v3互換
+        "is_golden_strict": is_strict_v5,      # v5: A3条件
+        "is_golden_high": is_high_v5,          # v5新規: A5条件
+        "pinpoint": pinpoint,                   # v5新規: TOP10特異点該当時のdict
     }
 
 
@@ -366,6 +369,9 @@ def get_golden_pattern_today():
         "loose_finished": 0, "strict_finished": 0,
         "loose_hits": 0, "strict_hits": 0,
         "loose_profit": 0, "strict_profit": 0,
+        # v5 fields
+        "high_golden": 0, "high_finished": 0, "high_hits": 0, "high_profit": 0,
+        "pinpoint_golden": 0, "pinpoint_finished": 0, "pinpoint_hits": 0, "pinpoint_profit": 0,
     }
 
     for r in races:
@@ -373,8 +379,12 @@ def get_golden_pattern_today():
         summary["total"] += 1
         is_loose = eval_result["is_golden_loose"]
         is_strict = eval_result["is_golden_strict"]
+        is_high = eval_result.get("is_golden_high", False)
+        is_pinpoint = eval_result.get("pinpoint") is not None
         if is_loose: summary["loose_golden"] += 1
         if is_strict: summary["strict_golden"] += 1
+        if is_high: summary["high_golden"] += 1
+        if is_pinpoint: summary["pinpoint_golden"] += 1
 
         race_result = _build_race_result(eval_result, results_by_id.get(r.get("race_id", "")))
         if race_result and is_loose:
@@ -389,6 +399,18 @@ def get_golden_pattern_today():
                 summary["strict_hits"] += 1
             if race_result.get("profit_yen") is not None:
                 summary["strict_profit"] += race_result["profit_yen"]
+        if race_result and is_high:
+            summary["high_finished"] += 1
+            if race_result["did_consensus_win"]:
+                summary["high_hits"] += 1
+            if race_result.get("profit_yen") is not None:
+                summary["high_profit"] += race_result["profit_yen"]
+        if race_result and is_pinpoint:
+            summary["pinpoint_finished"] += 1
+            if race_result["did_consensus_win"]:
+                summary["pinpoint_hits"] += 1
+            if race_result.get("profit_yen") is not None:
+                summary["pinpoint_profit"] += race_result["profit_yen"]
 
         enriched.append({
             "race_id": r.get("race_id", ""),
