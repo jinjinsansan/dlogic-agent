@@ -170,6 +170,7 @@ def format_jra_section(jra_races: list) -> str:
 
 
 def format_v6(data: dict) -> str:
+    from itertools import combinations
     races = data.get("races", []) or []
     weekday = data.get("weekday", "?")
     today = date_display(data.get("date", ""))
@@ -183,6 +184,21 @@ def format_v6(data: dict) -> str:
     if not strict_races and not obihiro_races and not jra_races:
         return format_silence(today, weekday)
 
+    # === 投資金額の概算計算 ===
+    # Layer 1: 単勝1点/件
+    l1_points = len(strict_races)
+    l1_yen = l1_points * 100
+    # Layer 3: F5複勝(1馬1点) + U2馬連BOX3(3点) + S1三連複1点(1点)
+    f5_points = sum(len(r.get("jra_f5_horses") or []) for r in jra_races)
+    u2_points = sum(3 for r in jra_races if r.get("is_layer3_jra_combo"))
+    s1_points = sum(1 for r in jra_races if r.get("is_layer3_jra_combo"))
+    l3_full_points = f5_points + u2_points + s1_points
+    l3_full_yen = l3_full_points * 100
+    l3_mid_points = f5_points + s1_points  # F5+S1 (馬連除外)
+    l3_mid_yen = l3_mid_points * 100
+    l3_low_points = s1_points  # S1のみ
+    l3_low_yen = l3_low_points * 100
+
     lines = [f"☀️ <b>{today} 任務開始</b>", ""]
     if strict_races:
         lines.append(format_strict_section(strict_races))
@@ -193,10 +209,33 @@ def format_v6(data: dict) -> str:
         if strict_races or obihiro_races: lines.append("")
         lines.append(format_jra_section(jra_races))
 
+    # === 推奨投資パターン (Layer 1/3 ある場合のみ) ===
+    if strict_races or jra_races:
+        lines.append("<b>━━━━━━━━━━━━━━━━━━</b>")
+        lines.append("💰 <b>本日 の 推奨 投資 パターン</b>")
+        lines.append("")
+        if strict_races and not jra_races:
+            # Layer 1 のみ (火水木)
+            lines.append(f"📍 <b>Layer 1 のみ</b>: {l1_points}点 = <b>¥{l1_yen:,}</b>")
+            lines.append("   (火水木 NAR本命厳格 単勝のみ、低リスク)")
+        else:
+            # Layer 3 ある日 (土日)
+            lines.append(f"🟢 <b>低リスク</b> (S1三連複1点のみ): {l3_low_points}点 = <b>¥{l3_low_yen:,}</b>")
+            lines.append("   ハイリターン狙い、ほとんど外れるが当たれば大きい")
+            lines.append("")
+            lines.append(f"🟡 <b>中</b> (F5複勝 + S1三連複1点): {l3_mid_points}点 = <b>¥{l3_mid_yen:,}</b>")
+            lines.append("   安定 + 一発、バランス型")
+            lines.append("")
+            lines.append(f"🔴 <b>フル</b> (Layer 1 + 全 Layer 3): {l1_points + l3_full_points}点 = <b>¥{l1_yen + l3_full_yen:,}</b>")
+            lines.append("   GANTZ 全戦略、利益も損失も最大化")
+        lines.append("")
+        lines.append("<i>※ 自分の 予算 と 心臓 に 合う パターン を 選んで くだちい</i>")
+        lines.append("")
+
     lines.extend([
         "<b>━━━━━━━━━━━━━━━━━━</b>",
         "💎 <b>運用ルール</b>",
-        "・全ターゲット <b>各100円</b>",
+        "・各ターゲット <b>100円</b> (固定)",
         "・絞らない、外しても続ける",
         "・ほとんど 失敗 し まち",
         '・"1点で 全額 回収" が 仕様 で だす',
