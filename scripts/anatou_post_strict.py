@@ -199,7 +199,45 @@ def format_v6(data: dict) -> str:
     l3_low_points = s1_points  # S1のみ
     l3_low_yen = l3_low_points * 100
 
+    # === 発走時刻サマリ (全Layer の時系列表示) ===
+    schedule_items: list = []
+    for r in strict_races:
+        schedule_items.append({
+            "time": r.get("start_time") or "—",
+            "venue": r.get("venue", ""),
+            "race_no": r.get("race_number", 0),
+            "label": "L1単勝",
+            "icon": "🔥",
+        })
+    for r in jra_races:
+        label_parts = []
+        if r.get("is_layer3_jra_f5"): label_parts.append("F5")
+        if r.get("is_layer3_jra_combo"): label_parts.append("U2/S1")
+        schedule_items.append({
+            "time": r.get("start_time") or "—",
+            "venue": r.get("venue", ""),
+            "race_no": r.get("race_number", 0),
+            "label": "L3 " + "+".join(label_parts),
+            "icon": "🔵",
+        })
+
+    def _time_sort_key(item):
+        t = item.get("time") or "99:99"
+        if t == "—": return "99:99"
+        return t
+
+    schedule_items.sort(key=_time_sort_key)
+
     lines = [f"☀️ <b>{today} 任務開始</b>", ""]
+
+    # 発走スケジュール (時系列)
+    if schedule_items:
+        lines.append("⏰ <b>本日 の 発走 スケジュール</b>")
+        lines.append("<b>━━━━━━━━━━━━━━━━━━</b>")
+        for item in schedule_items:
+            lines.append(f"  {item['icon']} <b>{item['time']}</b>  {item['venue']} {item['race_no']}R  <i>{item['label']}</i>")
+        lines.append("")
+
     if strict_races:
         lines.append(format_strict_section(strict_races))
     if obihiro_races:
