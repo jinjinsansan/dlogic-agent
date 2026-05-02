@@ -46,7 +46,7 @@ logging.basicConfig(format="%(asctime)s [%(levelname)s] %(message)s", level=logg
 logger = logging.getLogger(__name__)
 
 JST = timezone(timedelta(hours=9))
-ENGINES = ("dlogic", "ilogic", "viewlogic", "metalogic")
+ENGINES = ("dlogic", "ilogic", "viewlogic", "metalogic", "nlogic")
 
 DLOGIC_API_URL = os.getenv("DLOGIC_API_URL", "http://localhost:8000").rstrip("/")
 PCKEIBA_CONFIG = {
