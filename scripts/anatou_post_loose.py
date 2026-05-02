@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""穴党AI参謀: 09:30 信頼度・低 (緩いパターン) — 参考用、毎日."""
+"""穴党参謀AI: 09:30 信頼度・低（緩いパターン）— 参考用、毎日."""
 import logging
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from anatou_telegram_lib import (
-    fetch_pattern, send_telegram,
+    fetch_pattern, send_telegram_long,
     date_yyyymmdd_today, date_display,
     setup_logging,
 )
@@ -27,13 +27,13 @@ def format_loose(data: dict) -> str:
     today = date_display(data.get("date", ""))
 
     lines = [
-        f"⭐ <b>本日の参考レース ({today})</b>",
+        f"⭐ <b>{today} 穴党参謀AI 参考レース</b>",
         "━━━━━━━━━━━━",
-        "<b>【信頼度・低】</b> ※ 参考用",
+        "<b>【信頼度・低】</b>※ 参考用",
         "━━━━━━━━━━━━",
         "",
-        "<i>こちらは「見るだけ」もアリ。</i>",
-        "<i>全買い不要、参考まで。</i>",
+        "<i>こちらは「見るだけ」もOKです。</i>",
+        "<i>全買い不要、参考までにご確認ください。</i>",
         "",
     ]
 
@@ -54,9 +54,9 @@ def format_loose(data: dict) -> str:
     lines.append(f"全 {len(loose_only)}レース")
     lines.append("")
     lines.append("💡 <b>使い方</b>")
-    lines.append("・「信頼度・高」は全買い必須")
-    lines.append("・「信頼度・低」は <b>参考まで</b>")
-    lines.append("・余裕があれば狙いを絞ってどうぞ")
+    lines.append("・「信頼度・高」は全本命購入推奨")
+    lines.append("・「信頼度・低」は<b>参考まで</b>")
+    lines.append("・余裕があれば狙いを絞って購入してください")
 
     return "\n".join(lines)
 
@@ -73,7 +73,7 @@ def main():
         logger.info("no loose — silent")
         return 0
 
-    ok = send_telegram(msg)
+    ok = send_telegram_long(msg)
     logger.info(f"loose sent={ok}")
     return 0 if ok else 1
 

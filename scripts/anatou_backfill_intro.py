@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""穴党AI参謀: 起動時の過去実績紹介ポスト (一発実行)."""
+"""穴党参謀AI: 起動時の過去実績紹介ポスト（一発実行）."""
 import glob
 import json
 import logging
 import os
 import sys
-from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from anatou_telegram_lib import send_telegram, date_display, setup_logging
+from anatou_telegram_lib import send_telegram_long, date_display, setup_logging
 
 logger = setup_logging()
 SNAPSHOT_DIR = "/opt/dlogic/linebot/data/golden_history"
@@ -68,66 +67,60 @@ def format_intro() -> str:
     )
 
     lines = [
-        "🎉 <b>競馬GANTZ 起動</b>",
+        "🎉 <b>穴党参謀AI 配信スタート</b>",
         "<b>━━━━━━━━━━━━━━</b>",
         "",
-        "あなた 達 の 馬券 は もう ない。",
-        "新しい 馬券 を あげまし ょう。",
-        "",
-        "中穴 専門 の AI 任務を、",
-        "毎日 <b>無料 配信</b> し まち。",
+        "独自AI 4基の合議による人気薄推奨を、",
+        "毎日 <b>無料配信</b> しています。",
         "",
         "<b>━━━━━━━━━━━━━━</b>",
-        f"📊 <b>過去 戦果</b> ({period})",
+        f"📊 <b>過去戦果</b>（{period}）",
         "<b>━━━━━━━━━━━━━━</b>",
         "",
-        "🚀 <b>信頼度・最高 (確定 任務)</b>",
-        f"  出撃: <b>{agg['total_strict']}ターゲット</b>",
-        f"  撃破: <b>{agg['total_hits']}件</b> ({win_rate:.1f}%)",
+        "🚀 <b>本命厳格（Layer 1）累計</b>",
+        f"  本命数: <b>{agg['total_strict']}件</b>",
+        f"  的中: <b>{agg['total_hits']}件</b>（{win_rate:.1f}%）",
         f"  投資: ¥{invest:,}",
         f"  払戻: ¥{payout:,}",
-        f"  報酬: <b>+¥{agg['total_profit']:,}</b>",
+        f"  収支: <b>+¥{agg['total_profit']:,}</b>",
         f"  回収率: <b>{recovery:.1f}%</b>",
         "",
         "<b>━━━━━━━━━━━━━━</b>",
-        "🔥 <b>圧倒的 戦果 TOP3</b>",
+        "🔥 <b>戦果ベスト3</b>",
         "<b>━━━━━━━━━━━━━━</b>",
     ]
 
     for i, d in enumerate(agg["top_days"], 1):
         date_str = date_display(d["date"])
         lines.append(
-            f"  {i}. {date_str}: {d['n']}ターゲット中 {d['hits']}撃破 → "
+            f"  {i}. {date_str}: {d['n']}件中 {d['hits']}件的中 → "
             f"<b>+¥{d['profit']:,}</b>"
         )
 
     lines.append("")
     lines.append("<b>━━━━━━━━━━━━━━</b>")
-    lines.append("📝 <b>競馬GANTZ の 仕様</b>")
+    lines.append("📝 <b>運用の特徴</b>")
     lines.append("<b>━━━━━━━━━━━━━━</b>")
     lines.append("")
-    lines.append("・1日 の 撃破: 0〜5回 (平均1回)")
-    lines.append("・<b>27%の日 は 完全 失敗</b>")
-    lines.append("・残り 73% の 日 で 報酬 獲得")
-    lines.append("・上位3日 で 全期間 報酬 の 半分以上")
+    lines.append("・1日の的中: 0〜5回（平均1回）")
+    lines.append("・<b>27%の日は的中ゼロ</b>")
+    lines.append("・残り 73% の日でプラス収支")
+    lines.append("・上位3日で全期間収支の半分以上")
     lines.append("")
-    lines.append("つまり:")
-    lines.append("<b>「ほとんど 外し まち。1点で 全額 回収 し まち」</b>")
-    lines.append("これ が 競馬GANTZ の 仕様 で だす。")
+    lines.append("人気薄狙いのため的中率は低めですが、")
+    lines.append("1点的中で投資額を大きくカバーできるのが特徴です。")
     lines.append("")
-    lines.append("任務を <b>絞らずに 全部 受けて くだちい</b>。")
-    lines.append("たまに 来る <b>撃破日</b> を 取り逃さない。")
-    lines.append("これ が 勝つ 唯一 の 任務遂行法 で だす。")
+    lines.append("配信を絞らず全本命を淡々と購入し、")
+    lines.append("たまに来る大的中を取り逃さないことが運用前提です。")
     lines.append("")
     lines.append("<b>━━━━━━━━━━━━━━</b>")
-    lines.append("⏰ <b>配信 スケジュール</b>")
+    lines.append("⏰ <b>配信スケジュール</b>")
     lines.append("<b>━━━━━━━━━━━━━━</b>")
-    lines.append("・08:00 任務開始 + 昨日の戦果")
-    lines.append("・09:00 信頼度・最高 (月-金、該当日のみ)")
-    lines.append("・23:00 本日の 戦果報告")
+    lines.append("・08:00 朝の挨拶 + 昨日の戦果")
+    lines.append("・09:00 本命厳格（火水木、該当日のみ）")
+    lines.append("・23:00 本日の戦果報告")
     lines.append("")
-    lines.append("📡 完全無料、いつまで 続けるか 未定。")
-    lines.append("仕事を 受けて くだちい。")
+    lines.append("📡 完全無料で配信中です。")
 
     return "\n".join(lines)
 
@@ -138,7 +131,7 @@ def main():
         logger.error("no history data found")
         return 1
 
-    ok = send_telegram(msg)
+    ok = send_telegram_long(msg)
     logger.info(f"intro sent={ok}")
     return 0 if ok else 1
 

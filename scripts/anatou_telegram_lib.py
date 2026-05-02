@@ -5,6 +5,7 @@ ANATOU_* 環境変数を読む。
 """
 import logging
 import os
+import time
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -38,7 +39,7 @@ def fetch_pattern(date_str: str) -> dict | None:
     """Call the local golden-pattern API for the given YYYYMMDD."""
     url = f"{API_BASE}/api/data/golden-pattern/today"
     try:
-        resp = requests.get(url, params={"date": date_str, "race_type": "both"}, timeout=180)
+        resp = requests.get(url, params={"date": date_str, "race_type": "both"}, timeout=300)
     except Exception as e:
         logger.error(f"API fetch failed: {e}")
         return None
@@ -71,6 +72,64 @@ def send_telegram(text: str, disable_preview: bool = True) -> bool:
     except Exception as e:
         logger.error(f"Telegram send failed: {e}")
         return False
+
+
+def _split_for_telegram(text: str, limit: int = 3800) -> list[str]:
+    """Split text into chunks under Telegram's 4096-char limit.
+
+    Splits on blank-line boundaries first, then single newlines, then hard cut.
+    """
+    if len(text) <= limit:
+        return [text]
+
+    chunks: list[str] = []
+    cur = ""
+    for block in text.split("\n\n"):
+        candidate = (cur + "\n\n" + block) if cur else block
+        if len(candidate) <= limit:
+            cur = candidate
+            continue
+        if cur:
+            chunks.append(cur)
+            cur = ""
+        # Block alone exceeds limit → split by lines
+        if len(block) > limit:
+            line_buf = ""
+            for line in block.split("\n"):
+                cand2 = (line_buf + "\n" + line) if line_buf else line
+                if len(cand2) <= limit:
+                    line_buf = cand2
+                else:
+                    if line_buf:
+                        chunks.append(line_buf)
+                    # Single line still too long → hard cut
+                    while len(line) > limit:
+                        chunks.append(line[:limit])
+                        line = line[limit:]
+                    line_buf = line
+            cur = line_buf
+        else:
+            cur = block
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
+def send_telegram_long(text: str, disable_preview: bool = True, sleep_between: float = 1.0) -> bool:
+    """Send a possibly long HTML message, split across multiple Telegram messages.
+
+    Adds (n/m) suffix when split. Returns False on first send failure.
+    """
+    chunks = _split_for_telegram(text)
+    n = len(chunks)
+    for i, chunk in enumerate(chunks, 1):
+        suffix = f"\n\n<i>（{i}/{n}）</i>" if n > 1 else ""
+        if not send_telegram(chunk + suffix, disable_preview=disable_preview):
+            logger.error(f"send_telegram_long: failed at chunk {i}/{n}")
+            return False
+        if i < n and sleep_between > 0:
+            time.sleep(sleep_between)
+    return True
 
 
 def date_yyyymmdd_today() -> str:
