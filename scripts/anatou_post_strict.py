@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from anatou_telegram_lib import (
     fetch_pattern, send_telegram_long,
     date_yyyymmdd_today, date_display,
-    setup_logging,
+    setup_logging, forward_to_jinsanclaedbot,
 )
 
 logger = setup_logging()
@@ -168,8 +168,8 @@ def format_v6(data: dict) -> str:
     strict_races = [r for r in races if r.get("is_golden_strict")]
     # Layer 2 (帯広) は 2026-04-27 無効化
     obihiro_races: list = []
-    jra_races = [r for r in races
-                 if r.get("is_layer3_jra_f5") or r.get("is_layer3_jra_combo")]
+    # Layer 3 (JRA) は 2026-05-03 配信停止（仁さん判断、過去成績不振）
+    jra_races: list = []
 
     if not strict_races and not obihiro_races and not jra_races:
         return format_silence(today, weekday)
@@ -265,9 +265,6 @@ def format_v6(data: dict) -> str:
         "",
         "📈 <b>過去2ヶ月実績（leakage除去後 clean）</b>",
         "・<b>Layer 1</b> NAR本命厳格 単勝: 396.9% / CI下限 225% / n=145",
-        "・<b>Layer 3</b> JRA F5複勝: 131% / CI下限 118% / n=590",
-        "・<b>Layer 3</b> JRA U2馬連BOX3: 326% / CI下限 213% / n=1116",
-        "・<b>Layer 3</b> JRA S1三連複1点: 837% / CI下限 231% / n=372",
         "",
         "<i>毎日の結果は正直に公開しています。</i>",
     ])
@@ -288,6 +285,10 @@ def main():
 
     ok = send_telegram_long(msg)
     logger.info(f"strict sent={ok}")
+
+    if ok:
+        forward_to_jinsanclaedbot(msg)
+
     return 0 if ok else 1
 
 

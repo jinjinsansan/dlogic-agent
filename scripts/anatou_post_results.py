@@ -89,6 +89,7 @@ def _jra_result_lines(races: list) -> list:
         result = r.get("result") or {}
         f5_outcomes = result.get("f5_outcomes") or []
         l3_combo_hit = result.get("l3_combo_hit", False)
+        l3_combo_payout = result.get("l3_combo_payout") or 0
         top3_list = result.get("top3") or []
 
         lines.append(f"📍 <b>{venue} {rn}R</b>")
@@ -111,10 +112,83 @@ def _jra_result_lines(races: list) -> list:
         top3_nums = [str(t.get("horse_number", "")) for t in top3_list[:3]]
         combo_str = "-".join(top3_nums) if top3_nums else "?"
         if l3_combo_hit:
-            lines.append(f"   🎯 U2/S1 {combo_str} → 三連複 的中 ✅")
+            payout_str = f" 三連複 ¥{l3_combo_payout:,}" if l3_combo_payout else " 三連複 ✓"
+            lines.append(f"   🎯 U2/S1 {combo_str}{payout_str} 的中 ✅")
         else:
             actual = "-".join(str(t.get("horse_number", "?")) for t in top3_list[:3]) if top3_list else "?"
             lines.append(f"   🎯 U2/S1 → 外れ（実際の1-3着: {actual}）")
+    return lines
+
+
+def _jra_payout_summary(jra_races: list) -> list:
+    """Layer 3 の 100円均等買い収支サマリーを生成."""
+    f5_count = 0
+    f5_hits = 0
+    f5_payout = 0
+    combo_count = 0
+    combo_hits = 0
+    combo_payout = 0
+
+    for r in jra_races:
+        result = r.get("result") or {}
+        if not result:
+            continue
+        for oc in (result.get("f5_outcomes") or []):
+            f5_count += 1
+            if oc.get("placed"):
+                f5_hits += 1
+                f5_payout += oc.get("fukusho_payout") or 0
+        # 三連複は1レース1点想定（U2/S1 → 三連複1点）
+        # is_layer3_jra_combo フラグ持ちのレースだけカウント
+        if r.get("is_layer3_jra_combo"):
+            combo_count += 1
+            if result.get("l3_combo_hit"):
+                combo_hits += 1
+                combo_payout += result.get("l3_combo_payout") or 0
+
+    if f5_count == 0 and combo_count == 0:
+        return []
+
+    # 払戻データがまだ取れていない（pipeline 未整備）の場合は誤解を招くサマリーを出さない
+    # 的中があるはずなのに payout が全部0 → データソース未配線。表示スキップ。
+    has_hits = f5_hits > 0 or combo_hits > 0
+    has_payout = f5_payout > 0 or combo_payout > 0
+    if has_hits and not has_payout:
+        return ["", "<i>(払戻金額データはまだ取得経路を整備中)</i>"]
+
+    f5_invest = f5_count * 100
+    f5_profit = f5_payout - f5_invest
+    f5_recovery = round(f5_payout / f5_invest * 100) if f5_invest > 0 else 0
+    f5_sign = "+" if f5_profit >= 0 else ""
+
+    combo_invest = combo_count * 100
+    combo_profit = combo_payout - combo_invest
+    combo_recovery = round(combo_payout / combo_invest * 100) if combo_invest > 0 else 0
+    combo_sign = "+" if combo_profit >= 0 else ""
+
+    total_invest = f5_invest + combo_invest
+    total_payout = f5_payout + combo_payout
+    total_profit = total_payout - total_invest
+    total_recovery = round(total_payout / total_invest * 100) if total_invest > 0 else 0
+    total_sign = "+" if total_profit >= 0 else ""
+    total_emoji = "✨" if total_profit > 0 else ("💧" if total_profit < 0 else "")
+
+    lines = ["", "📊 <b>100円均等買い 戦果サマリー</b>"]
+    if f5_count:
+        lines.append(
+            f"  💎 F5 複勝: {f5_count}点 投資¥{f5_invest:,} → 払戻¥{f5_payout:,} "
+            f"→ 収支<b>¥{f5_sign}{f5_profit:,}</b>（回収率 {f5_recovery}%）"
+        )
+    if combo_count:
+        lines.append(
+            f"  🎯 U2/S1 三連複: {combo_count}点 投資¥{combo_invest:,} → 払戻¥{combo_payout:,} "
+            f"→ 収支<b>¥{combo_sign}{combo_profit:,}</b>（回収率 {combo_recovery}%）"
+        )
+    if f5_count and combo_count:
+        lines.append(
+            f"  💰 <b>合計</b>: 投資¥{total_invest:,} → 払戻¥{total_payout:,} "
+            f"→ 収支<b>¥{total_sign}{total_profit:,}</b>（回収率 {total_recovery}%）{total_emoji}"
+        )
     return lines
 
 
@@ -168,21 +242,9 @@ def format_v6_results(data: dict) -> str:
             lines.append(f"  複勝: {ob_finished}頭 / 入着: {ob_hits}頭")
         lines.append("")
 
-    # Layer 3 (JRA S級)
-    if jra_races:
-        lines.append("<b>━━━━━━━━━━━━━━</b>")
-        lines.append("🔵 <b>Layer 3 — JRA S級 結果</b>")
-        lines.append("")
-        lines.extend(_jra_result_lines(jra_races))
-        f5_finished = summary.get("jra_f5_finished", 0)
-        f5_hits = summary.get("jra_f5_place_hits", 0)
-        combo_finished = summary.get("jra_combo_finished", 0)
-        combo_hits = summary.get("jra_combo_hits", 0)
-        if f5_finished:
-            lines.append(f"  F5複勝: {f5_finished}頭 / 入着: {f5_hits}頭")
-        if combo_finished:
-            lines.append(f"  U2/S1: {combo_finished}レース / 三連複的中: {combo_hits}レース")
-        lines.append("")
+    # Layer 3 (JRA S級) — 2026-05-03 配信停止（仁さん判断）
+    # 過去成績不振のため JRA 配信廃止。コードは残置、必要なら再有効化可能。
+    # 元のロジックは backup ファイル参照。
 
     # 総括コメント (Layer 1 のみ)
     if strict_races:

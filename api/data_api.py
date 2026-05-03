@@ -207,13 +207,16 @@ def _build_race_result(eval_result: dict, race_result: dict | None) -> dict | No
     if is_buy:
         profit = (win_payout - 100) if did_win else -100
 
+    # 複勝配当エントリ（保存側のキー名は "fukusho" 統一済み、互換のため "place" もフォールバック）
+    fukusho_entries = payouts.get("fukusho") or payouts.get("place") or []
+
     # Layer 2 (帯広中穴) outcome per-horse: check placement in top3
     obihiro_outcomes = []
     for h in (eval_result.get("obihiro_horses") or []):
         hn = h.get("horse_number")
         placed = hn in top3_numbers
         fukusho_payout = 0
-        for entry in (payouts.get("fukusho") or []):
+        for entry in fukusho_entries:
             if entry.get("horse_number") == hn:
                 fukusho_payout = entry.get("payout") or 0
                 break
@@ -229,17 +232,26 @@ def _build_race_result(eval_result: dict, race_result: dict | None) -> dict | No
         hn = h.get("horse_number")
         placed = hn in top3_numbers
         fukusho_payout = 0
-        for entry in (payouts.get("fukusho") or []):
+        for entry in fukusho_entries:
             if entry.get("horse_number") == hn:
                 fukusho_payout = entry.get("payout") or 0
                 break
         f5_outcomes.append({"horse_number": hn, "placed": placed, "fukusho_payout": fukusho_payout})
 
-    # Layer 3 U2/S1 outcome
+    # Layer 3 U2/S1 outcome（三連複: 順序問わず3頭の組み合わせ）
     top3_pick = [h.get("horse_number") for h in (eval_result.get("jra_top3_horses") or [])]
     top3_pick_set = set(top3_pick)
     top3_result_set = set(top3_numbers[:3])
     l3_combo_hit = len(top3_pick) == 3 and top3_pick_set == top3_result_set
+
+    # 三連複配当（hit時のみ計算、payouts["sanrenpuku"] から組み合わせ一致するエントリを取得）
+    l3_combo_payout = 0
+    if l3_combo_hit:
+        for entry in (payouts.get("sanrenpuku") or []):
+            combo = entry.get("combo") or []
+            if combo and set(combo) == top3_pick_set:
+                l3_combo_payout = entry.get("payout") or 0
+                break
 
     return {
         "status": "finished",
@@ -252,6 +264,7 @@ def _build_race_result(eval_result: dict, race_result: dict | None) -> dict | No
         "obihiro_outcomes": obihiro_outcomes,
         "f5_outcomes": f5_outcomes,
         "l3_combo_hit": l3_combo_hit,
+        "l3_combo_payout": l3_combo_payout,
     }
 
 

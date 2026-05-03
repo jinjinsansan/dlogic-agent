@@ -5,6 +5,8 @@ ANATOU_* 環境変数を読む。
 """
 import logging
 import os
+import shlex
+import subprocess
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -74,10 +76,12 @@ def send_telegram(text: str, disable_preview: bool = True) -> bool:
         return False
 
 
-def _split_for_telegram(text: str, limit: int = 3800) -> list[str]:
-    """Split text into chunks under Telegram's 4096-char limit.
+def _split_for_telegram(text: str, limit: int = 3300) -> list[str]:
+    """Split text into chunks well under Telegram's 4096-char limit.
 
     Splits on blank-line boundaries first, then single newlines, then hard cut.
+    Limit is conservative (3300) to leave room for HTML entity expansion
+    (& → &amp; etc.) and the (n/m) suffix added by send_telegram_long.
     """
     if len(text) <= limit:
         return [text]
@@ -119,17 +123,81 @@ def send_telegram_long(text: str, disable_preview: bool = True, sleep_between: f
     """Send a possibly long HTML message, split across multiple Telegram messages.
 
     Adds (n/m) suffix when split. Returns False on first send failure.
+    最終 send 直前に文字数を再検証し、もし 4000 を超えていたら hard cut でさらに分割する
+    (HTML 実体展開等で想定外に膨らんだケースの安全網)。
     """
     chunks = _split_for_telegram(text)
-    n = len(chunks)
-    for i, chunk in enumerate(chunks, 1):
+    # 安全網: 各チャンクが 4000 を超えていたら hard cut で再分割
+    safe_chunks: list[str] = []
+    HARD_LIMIT = 4000
+    for chunk in chunks:
+        while len(chunk) > HARD_LIMIT:
+            safe_chunks.append(chunk[:HARD_LIMIT])
+            chunk = chunk[HARD_LIMIT:]
+        safe_chunks.append(chunk)
+    n = len(safe_chunks)
+    for i, chunk in enumerate(safe_chunks, 1):
         suffix = f"\n\n<i>（{i}/{n}）</i>" if n > 1 else ""
         if not send_telegram(chunk + suffix, disable_preview=disable_preview):
-            logger.error(f"send_telegram_long: failed at chunk {i}/{n}")
+            logger.error(f"send_telegram_long: failed at chunk {i}/{n} (chunk_len={len(chunk)})")
             return False
         if i < n and sleep_between > 0:
             time.sleep(sleep_between)
     return True
+
+
+def forward_to_jinsanclaedbot(text: str) -> bool:
+    """OpenClaw VPS の @jinsanclaedbot に半自動購入確認 prompt 付きで予想を転送.
+
+    SSH 経由で hermes VPS の openclaw agent CLI を呼び、main agent (Sonnet 4-6)
+    に inject する。クローが指示通り Telegram で仁さんへ転送 → 仁さんが OK 返信で
+    SPAT4/即PAT 購入開始（AGENTS.md 馬券購入ガード適用）。
+
+    既存 ANATOU 配信に影響しないよう、失敗しても例外は出さず False を返す。
+    """
+    try:
+        host = os.environ.get('OPENCLAW_SSH_HOST', 'hermes@210.131.222.240')
+        chat_id = os.environ.get('OPENCLAW_TG_CHAT_ID', '197618639')
+        agent = os.environ.get('OPENCLAW_AGENT', 'main')
+
+        inject_message = (
+            "あなたは何もせず、以下のテキストを応答本文としてそのまま"
+            "ユーザーに返信してください（前置きや説明は一切不要）：\n\n"
+            "【競馬GANTZ 自動取得】\n"
+            f"{text}\n\n"
+            "購入準備できました。OK と返信で SPAT4/即PAT 購入を開始します。"
+        )
+
+        remote_cmd = (
+            f"~/.npm-global/bin/openclaw agent "
+            f"--agent {shlex.quote(agent)} "
+            f"--message {shlex.quote(inject_message)} "
+            f"--deliver "
+            f"--reply-channel telegram "
+            f"--reply-to {shlex.quote(chat_id)}"
+        )
+
+        cmd = [
+            'ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10',
+            host, remote_cmd,
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+
+        if result.returncode == 0:
+            logger.info(f"forward to jinsanclaedbot ok (text_len={len(text)})")
+            return True
+        logger.warning(
+            f"forward to jinsanclaedbot failed: rc={result.returncode} "
+            f"stderr={result.stderr[:300]}"
+        )
+        return False
+    except subprocess.TimeoutExpired:
+        logger.warning("forward to jinsanclaedbot timeout")
+        return False
+    except Exception as e:
+        logger.warning(f"forward to jinsanclaedbot exception: {e}")
+        return False
 
 
 def date_yyyymmdd_today() -> str:

@@ -200,7 +200,7 @@ def parse_payout_row(row) -> dict:
         if fk:
             fukusho.append(fk)
     if fukusho:
-        payouts["place"] = fukusho
+        payouts["fukusho"] = fukusho
 
     # 馬連 (3枠)
     umaren = []
