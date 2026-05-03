@@ -196,7 +196,7 @@ def format_v6_results(data: dict) -> str:
     races = data.get("races", []) or []
     strict_races = [r for r in races if r.get("is_golden_strict")]
     obihiro_races: list = []  # Layer 2 (帯広) 無効化中
-    jra_races = [r for r in races if r.get("is_layer3_jra_f5") or r.get("is_layer3_jra_combo")]
+    jra_races: list = []  # Layer 3 (JRA) 配信停止と整合 (2026-05-03)
 
     today = date_display(data.get("date", ""))
 
