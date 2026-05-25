@@ -1,0 +1,24 @@
+{
+  "schema_version": "anatou_forward_log.v1",
+  "date": "20260525",
+  "created_at": "2026-05-25T17:31:33",
+  "mode": "race_json_or_mixed",
+  "source_wide_jsonl": [
+    "E:\\dev\\Cusor\\dlogic-agent\\data\\anatou_today_wide_anatou_races_both_races_20260525_20260525_20260525.jsonl"
+  ],
+  "source_race_json": [],
+  "diagnosis_original": [
+    "E:\\dev\\Cusor\\dlogic-agent\\data\\anatou_today_diagnosis_anatou_today_wide_anatou_races_both_races_20260525_20260525_20260525_20260525.jsonl"
+  ],
+  "diagnosis_archived": [
+    "E:\\dev\\Cusor\\dlogic-agent\\data\\anatou_forward\\20260525\\diagnosis_1.jsonl"
+  ],
+  "preview_md": "E:\\dev\\Cusor\\dlogic-agent\\docs\\anatou_forward\\20260525\\preview.md",
+  "preview_json": "E:\\dev\\Cusor\\dlogic-agent\\data\\anatou_forward\\20260525\\preview.json",
+  "result_check_md": "E:\\dev\\Cusor\\dlogic-agent\\docs\\anatou_forward\\20260525\\result_check.md",
+  "notes": [
+    "This is a forward validation log, not a purchase recommendation.",
+    "User-facing skip should be read as low priority.",
+    "AI low-rated popular is not a confirmed elimination signal."
+  ]
+}

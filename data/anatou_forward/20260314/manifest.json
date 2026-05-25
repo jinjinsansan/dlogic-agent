@@ -1,0 +1,27 @@
+{
+  "schema_version": "anatou_forward_log.v1",
+  "date": "20260314",
+  "created_at": "2026-05-25T14:47:31",
+  "mode": "wide_jsonl",
+  "source_wide_jsonl": [
+    "data\\wide_rebirth_dataset_api_jra_20260301_20260430.jsonl",
+    "data\\wide_rebirth_dataset_api_nar_20260301_20260430.jsonl"
+  ],
+  "source_race_json": [],
+  "diagnosis_original": [
+    "E:\\dev\\Cusor\\dlogic-agent\\data\\anatou_today_diagnosis_wide_rebirth_dataset_api_jra_20260301_20260430_20260314.jsonl",
+    "E:\\dev\\Cusor\\dlogic-agent\\data\\anatou_today_diagnosis_wide_rebirth_dataset_api_nar_20260301_20260430_20260314.jsonl"
+  ],
+  "diagnosis_archived": [
+    "E:\\dev\\Cusor\\dlogic-agent\\data\\anatou_forward\\20260314\\diagnosis_1.jsonl",
+    "E:\\dev\\Cusor\\dlogic-agent\\data\\anatou_forward\\20260314\\diagnosis_2.jsonl"
+  ],
+  "preview_md": "E:\\dev\\Cusor\\dlogic-agent\\docs\\anatou_forward\\20260314\\preview.md",
+  "preview_json": "E:\\dev\\Cusor\\dlogic-agent\\data\\anatou_forward\\20260314\\preview.json",
+  "result_check_md": "E:\\dev\\Cusor\\dlogic-agent\\docs\\anatou_forward\\20260314\\result_check.md",
+  "notes": [
+    "This is a forward validation log, not a purchase recommendation.",
+    "User-facing skip should be read as low priority.",
+    "AI low-rated popular is not a confirmed elimination signal."
+  ]
+}

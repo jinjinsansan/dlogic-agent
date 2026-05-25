@@ -1,0 +1,4046 @@
+{
+  "schema_version": "anatou_today_diagnosis_preview.v1",
+  "generated_at": "2026-05-25T14:47:30",
+  "date_filter": "2026-03-14",
+  "source_files": [
+    "E:\\dev\\Cusor\\dlogic-agent\\data\\anatou_today_diagnosis_wide_rebirth_dataset_api_jra_20260301_20260430_20260314.jsonl",
+    "E:\\dev\\Cusor\\dlogic-agent\\data\\anatou_today_diagnosis_wide_rebirth_dataset_api_nar_20260301_20260430_20260314.jsonl"
+  ],
+  "total_races": 52,
+  "counts": {
+    "by_label": {
+      "ai_consensus": 20,
+      "skip": 22,
+      "market_gap": 7,
+      "hole_candidate": 3
+    },
+    "by_use": {
+      "hole_check": 23,
+      "skip": 22,
+      "ai_low_rated_popular_check": 7
+    },
+    "by_type": {
+      "jra": 36,
+      "nar": 16
+    },
+    "by_venue": {
+      "中京": 12,
+      "中山": 12,
+      "佐賀": 12,
+      "帯広": 4,
+      "阪神": 12
+    },
+    "low_priority_count": 22
+  },
+  "sections": {
+    "attention": [
+      {
+        "race_id": "2026-03-14-中山-8",
+        "date": "2026-03-14",
+        "race_type": "jra",
+        "venue": "中山",
+        "race_number": 8,
+        "primary_label": "hole_candidate",
+        "label_text": "AI穴馬候補",
+        "suggested_use": "hole_check",
+        "use_text": "AI穴馬チェック",
+        "watch_score": 76.2,
+        "market_gap_score": 78,
+        "ai_hole_horses": [
+          {
+            "horse": 14,
+            "popularity": 11,
+            "top5_votes": 4,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "avg_rank": 3.75,
+            "popularity_gap": 7.25,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 5,
+            "popularity": 7,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "avg_rank": 1.67,
+            "popularity_gap": 5.33,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 11,
+            "popularity": 6,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "avg_rank": 1.0,
+            "popularity_gap": 5.0,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          }
+        ],
+        "ai_low_rated_popular_horses": [],
+        "consensus_horses": [
+          {
+            "horse": 14,
+            "popularity": 11,
+            "top5_votes": 4,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 5,
+            "popularity": 7,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 11,
+            "popularity": 6,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 1,
+            "popularity": 2,
+            "top5_votes": 3,
+            "top3_votes": 1,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          }
+        ],
+        "reason": "AI穴: 14番(11人気/AI4基)、5番(7人気/AI3基) / AI中心: 14番(11人気/AI4基)"
+      },
+      {
+        "race_id": "2026-03-14-帯広-11",
+        "date": "2026-03-14",
+        "race_type": "nar",
+        "venue": "帯広",
+        "race_number": 11,
+        "primary_label": "market_gap",
+        "label_text": "荒れ警戒",
+        "suggested_use": "ai_low_rated_popular_check",
+        "use_text": "人気馬の過信注意",
+        "watch_score": 66.9,
+        "market_gap_score": 72,
+        "ai_hole_horses": [
+          {
+            "horse": 9,
+            "popularity": 9,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "avg_rank": 1.0,
+            "popularity_gap": 8.0,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 1,
+            "popularity": 8,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "avg_rank": 1.67,
+            "popularity_gap": 6.33,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          }
+        ],
+        "ai_low_rated_popular_horses": [
+          {
+            "horse": 8,
+            "popularity": 1,
+            "top5_votes": 0,
+            "top3_votes": 0,
+            "engines": []
+          },
+          {
+            "horse": 6,
+            "popularity": 3,
+            "top5_votes": 0,
+            "top3_votes": 0,
+            "engines": []
+          }
+        ],
+        "consensus_horses": [
+          {
+            "horse": 1,
+            "popularity": 8,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 9,
+            "popularity": 9,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 2,
+            "popularity": 2,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 3,
+            "popularity": 7,
+            "top5_votes": 3,
+            "top3_votes": 1,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 4,
+            "popularity": 10,
+            "top5_votes": 3,
+            "top3_votes": 0,
+            "top1_votes": 0,
+            "best_rank": 4,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          }
+        ],
+        "reason": "AI穴: 9番(9人気/AI3基)、1番(8人気/AI3基) / 過信注意: 8番(1人気/AI0基)、6番(3人気/AI0基) / AI中心: 1番(8人気/AI3基)"
+      },
+      {
+        "race_id": "2026-03-14-中京-9",
+        "date": "2026-03-14",
+        "race_type": "jra",
+        "venue": "中京",
+        "race_number": 9,
+        "primary_label": "market_gap",
+        "label_text": "荒れ警戒",
+        "suggested_use": "ai_low_rated_popular_check",
+        "use_text": "人気馬の過信注意",
+        "watch_score": 66.9,
+        "market_gap_score": 62,
+        "ai_hole_horses": [
+          {
+            "horse": 2,
+            "popularity": 8,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "avg_rank": 3.0,
+            "popularity_gap": 5.0,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 5,
+            "popularity": 5,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "avg_rank": 1.67,
+            "popularity_gap": 3.33,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          }
+        ],
+        "ai_low_rated_popular_horses": [
+          {
+            "horse": 4,
+            "popularity": 3,
+            "top5_votes": 0,
+            "top3_votes": 0,
+            "engines": []
+          }
+        ],
+        "consensus_horses": [
+          {
+            "horse": 8,
+            "popularity": 2,
+            "top5_votes": 4,
+            "top3_votes": 4,
+            "top1_votes": 2,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 5,
+            "popularity": 5,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 2,
+            "popularity": 8,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 1,
+            "popularity": 6,
+            "top5_votes": 3,
+            "top3_votes": 0,
+            "top1_votes": 0,
+            "best_rank": 4,
+            "engines": [
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          }
+        ],
+        "reason": "AI穴: 2番(8人気/AI3基)、5番(5人気/AI3基) / 過信注意: 4番(3人気/AI0基) / AI中心: 8番(2人気/AI4基)"
+      },
+      {
+        "race_id": "2026-03-14-阪神-1",
+        "date": "2026-03-14",
+        "race_type": "jra",
+        "venue": "阪神",
+        "race_number": 1,
+        "primary_label": "market_gap",
+        "label_text": "荒れ警戒",
+        "suggested_use": "ai_low_rated_popular_check",
+        "use_text": "人気馬の過信注意",
+        "watch_score": 63.6,
+        "market_gap_score": 62,
+        "ai_hole_horses": [
+          {
+            "horse": 13,
+            "popularity": 8,
+            "top5_votes": 4,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "avg_rank": 3.75,
+            "popularity_gap": 4.25,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 6,
+            "popularity": 12,
+            "top5_votes": 3,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "avg_rank": 3.33,
+            "popularity_gap": 8.67,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          }
+        ],
+        "ai_low_rated_popular_horses": [
+          {
+            "horse": 4,
+            "popularity": 1,
+            "top5_votes": 0,
+            "top3_votes": 0,
+            "engines": []
+          }
+        ],
+        "consensus_horses": [
+          {
+            "horse": 1,
+            "popularity": 2,
+            "top5_votes": 4,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 13,
+            "popularity": 8,
+            "top5_votes": 4,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 3,
+            "popularity": 5,
+            "top5_votes": 3,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 6,
+            "popularity": 12,
+            "top5_votes": 3,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 8,
+            "popularity": 3,
+            "top5_votes": 3,
+            "top3_votes": 1,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "engines": [
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          }
+        ],
+        "reason": "AI穴: 13番(8人気/AI4基)、6番(12人気/AI3基) / 過信注意: 4番(1人気/AI0基) / AI中心: 1番(2人気/AI4基)"
+      },
+      {
+        "race_id": "2026-03-14-中京-8",
+        "date": "2026-03-14",
+        "race_type": "jra",
+        "venue": "中京",
+        "race_number": 8,
+        "primary_label": "ai_consensus",
+        "label_text": "AI一致",
+        "suggested_use": "hole_check",
+        "use_text": "AI穴馬チェック",
+        "watch_score": 60.9,
+        "market_gap_score": 52,
+        "ai_hole_horses": [
+          {
+            "horse": 14,
+            "popularity": 5,
+            "top5_votes": 4,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "avg_rank": 1.75,
+            "popularity_gap": 3.25,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 16,
+            "popularity": 6,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "avg_rank": 3.0,
+            "popularity_gap": 3.0,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          }
+        ],
+        "ai_low_rated_popular_horses": [],
+        "consensus_horses": [
+          {
+            "horse": 14,
+            "popularity": 5,
+            "top5_votes": 4,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 16,
+            "popularity": 6,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 15,
+            "popularity": 15,
+            "top5_votes": 2,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "ilogic",
+              "metalogic"
+            ]
+          }
+        ],
+        "reason": "AI穴: 14番(5人気/AI4基)、16番(6人気/AI3基) / AI中心: 14番(5人気/AI4基)"
+      },
+      {
+        "race_id": "2026-03-14-中京-12",
+        "date": "2026-03-14",
+        "race_type": "jra",
+        "venue": "中京",
+        "race_number": 12,
+        "primary_label": "hole_candidate",
+        "label_text": "AI穴馬候補",
+        "suggested_use": "hole_check",
+        "use_text": "AI穴馬チェック",
+        "watch_score": 60.4,
+        "market_gap_score": 52,
+        "ai_hole_horses": [
+          {
+            "horse": 7,
+            "popularity": 5,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "avg_rank": 1.0,
+            "popularity_gap": 4.0,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 4,
+            "popularity": 11,
+            "top5_votes": 3,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "avg_rank": 2.67,
+            "popularity_gap": 8.33,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          }
+        ],
+        "ai_low_rated_popular_horses": [],
+        "consensus_horses": [
+          {
+            "horse": 7,
+            "popularity": 5,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 4,
+            "popularity": 11,
+            "top5_votes": 3,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 5,
+            "popularity": 3,
+            "top5_votes": 3,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          }
+        ],
+        "reason": "AI穴: 7番(5人気/AI3基)、4番(11人気/AI3基) / AI中心: 7番(5人気/AI3基)"
+      }
+    ],
+    "low_popular": [
+      {
+        "race_id": "2026-03-14-帯広-11",
+        "date": "2026-03-14",
+        "race_type": "nar",
+        "venue": "帯広",
+        "race_number": 11,
+        "primary_label": "market_gap",
+        "label_text": "荒れ警戒",
+        "suggested_use": "ai_low_rated_popular_check",
+        "use_text": "人気馬の過信注意",
+        "watch_score": 66.9,
+        "market_gap_score": 72,
+        "ai_hole_horses": [
+          {
+            "horse": 9,
+            "popularity": 9,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "avg_rank": 1.0,
+            "popularity_gap": 8.0,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 1,
+            "popularity": 8,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "avg_rank": 1.67,
+            "popularity_gap": 6.33,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          }
+        ],
+        "ai_low_rated_popular_horses": [
+          {
+            "horse": 8,
+            "popularity": 1,
+            "top5_votes": 0,
+            "top3_votes": 0,
+            "engines": []
+          },
+          {
+            "horse": 6,
+            "popularity": 3,
+            "top5_votes": 0,
+            "top3_votes": 0,
+            "engines": []
+          }
+        ],
+        "consensus_horses": [
+          {
+            "horse": 1,
+            "popularity": 8,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 9,
+            "popularity": 9,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 2,
+            "popularity": 2,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 3,
+            "popularity": 7,
+            "top5_votes": 3,
+            "top3_votes": 1,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 4,
+            "popularity": 10,
+            "top5_votes": 3,
+            "top3_votes": 0,
+            "top1_votes": 0,
+            "best_rank": 4,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          }
+        ],
+        "reason": "AI穴: 9番(9人気/AI3基)、1番(8人気/AI3基) / 過信注意: 8番(1人気/AI0基)、6番(3人気/AI0基) / AI中心: 1番(8人気/AI3基)"
+      },
+      {
+        "race_id": "2026-03-14-中京-9",
+        "date": "2026-03-14",
+        "race_type": "jra",
+        "venue": "中京",
+        "race_number": 9,
+        "primary_label": "market_gap",
+        "label_text": "荒れ警戒",
+        "suggested_use": "ai_low_rated_popular_check",
+        "use_text": "人気馬の過信注意",
+        "watch_score": 66.9,
+        "market_gap_score": 62,
+        "ai_hole_horses": [
+          {
+            "horse": 2,
+            "popularity": 8,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "avg_rank": 3.0,
+            "popularity_gap": 5.0,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 5,
+            "popularity": 5,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "avg_rank": 1.67,
+            "popularity_gap": 3.33,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          }
+        ],
+        "ai_low_rated_popular_horses": [
+          {
+            "horse": 4,
+            "popularity": 3,
+            "top5_votes": 0,
+            "top3_votes": 0,
+            "engines": []
+          }
+        ],
+        "consensus_horses": [
+          {
+            "horse": 8,
+            "popularity": 2,
+            "top5_votes": 4,
+            "top3_votes": 4,
+            "top1_votes": 2,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 5,
+            "popularity": 5,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 2,
+            "popularity": 8,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 1,
+            "popularity": 6,
+            "top5_votes": 3,
+            "top3_votes": 0,
+            "top1_votes": 0,
+            "best_rank": 4,
+            "engines": [
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          }
+        ],
+        "reason": "AI穴: 2番(8人気/AI3基)、5番(5人気/AI3基) / 過信注意: 4番(3人気/AI0基) / AI中心: 8番(2人気/AI4基)"
+      },
+      {
+        "race_id": "2026-03-14-阪神-1",
+        "date": "2026-03-14",
+        "race_type": "jra",
+        "venue": "阪神",
+        "race_number": 1,
+        "primary_label": "market_gap",
+        "label_text": "荒れ警戒",
+        "suggested_use": "ai_low_rated_popular_check",
+        "use_text": "人気馬の過信注意",
+        "watch_score": 63.6,
+        "market_gap_score": 62,
+        "ai_hole_horses": [
+          {
+            "horse": 13,
+            "popularity": 8,
+            "top5_votes": 4,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "avg_rank": 3.75,
+            "popularity_gap": 4.25,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 6,
+            "popularity": 12,
+            "top5_votes": 3,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "avg_rank": 3.33,
+            "popularity_gap": 8.67,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          }
+        ],
+        "ai_low_rated_popular_horses": [
+          {
+            "horse": 4,
+            "popularity": 1,
+            "top5_votes": 0,
+            "top3_votes": 0,
+            "engines": []
+          }
+        ],
+        "consensus_horses": [
+          {
+            "horse": 1,
+            "popularity": 2,
+            "top5_votes": 4,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 13,
+            "popularity": 8,
+            "top5_votes": 4,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 3,
+            "popularity": 5,
+            "top5_votes": 3,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 6,
+            "popularity": 12,
+            "top5_votes": 3,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 8,
+            "popularity": 3,
+            "top5_votes": 3,
+            "top3_votes": 1,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "engines": [
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          }
+        ],
+        "reason": "AI穴: 13番(8人気/AI4基)、6番(12人気/AI3基) / 過信注意: 4番(1人気/AI0基) / AI中心: 1番(2人気/AI4基)"
+      },
+      {
+        "race_id": "2026-03-14-帯広-5",
+        "date": "2026-03-14",
+        "race_type": "nar",
+        "venue": "帯広",
+        "race_number": 5,
+        "primary_label": "market_gap",
+        "label_text": "荒れ警戒",
+        "suggested_use": "ai_low_rated_popular_check",
+        "use_text": "人気馬の過信注意",
+        "watch_score": 52.5,
+        "market_gap_score": 46,
+        "ai_hole_horses": [
+          {
+            "horse": 3,
+            "popularity": 7,
+            "top5_votes": 4,
+            "top3_votes": 4,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "avg_rank": 1.5,
+            "popularity_gap": 5.5,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          }
+        ],
+        "ai_low_rated_popular_horses": [
+          {
+            "horse": 9,
+            "popularity": 1,
+            "top5_votes": 0,
+            "top3_votes": 0,
+            "engines": []
+          },
+          {
+            "horse": 7,
+            "popularity": 3,
+            "top5_votes": 0,
+            "top3_votes": 0,
+            "engines": []
+          }
+        ],
+        "consensus_horses": [
+          {
+            "horse": 3,
+            "popularity": 7,
+            "top5_votes": 4,
+            "top3_votes": 4,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 1,
+            "popularity": 2,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 2,
+            "popularity": 5,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 4,
+            "popularity": 4,
+            "top5_votes": 3,
+            "top3_votes": 0,
+            "top1_votes": 0,
+            "best_rank": 4,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 5,
+            "popularity": 8,
+            "top5_votes": 3,
+            "top3_votes": 0,
+            "top1_votes": 0,
+            "best_rank": 5,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          }
+        ],
+        "reason": "AI穴: 3番(7人気/AI4基) / 過信注意: 9番(1人気/AI0基)、7番(3人気/AI0基) / AI中心: 3番(7人気/AI4基)"
+      },
+      {
+        "race_id": "2026-03-14-中京-4",
+        "date": "2026-03-14",
+        "race_type": "jra",
+        "venue": "中京",
+        "race_number": 4,
+        "primary_label": "market_gap",
+        "label_text": "荒れ警戒",
+        "suggested_use": "ai_low_rated_popular_check",
+        "use_text": "人気馬の過信注意",
+        "watch_score": 48.3,
+        "market_gap_score": 36,
+        "ai_hole_horses": [
+          {
+            "horse": 16,
+            "popularity": 7,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "avg_rank": 2.0,
+            "popularity_gap": 5.0,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          }
+        ],
+        "ai_low_rated_popular_horses": [
+          {
+            "horse": 5,
+            "popularity": 2,
+            "top5_votes": 0,
+            "top3_votes": 0,
+            "engines": []
+          }
+        ],
+        "consensus_horses": [
+          {
+            "horse": 16,
+            "popularity": 7,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 8,
+            "popularity": 1,
+            "top5_votes": 3,
+            "top3_votes": 2,
+            "top1_votes": 2,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 15,
+            "popularity": 16,
+            "top5_votes": 3,
+            "top3_votes": 0,
+            "top1_votes": 0,
+            "best_rank": 4,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 14,
+            "popularity": 6,
+            "top5_votes": 2,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "metalogic",
+              "viewlogic"
+            ]
+          }
+        ],
+        "reason": "AI穴: 16番(7人気/AI3基) / 過信注意: 5番(2人気/AI0基) / AI中心: 16番(7人気/AI3基)"
+      },
+      {
+        "race_id": "2026-03-14-佐賀-6",
+        "date": "2026-03-14",
+        "race_type": "nar",
+        "venue": "佐賀",
+        "race_number": 6,
+        "primary_label": "market_gap",
+        "label_text": "荒れ警戒",
+        "suggested_use": "ai_low_rated_popular_check",
+        "use_text": "人気馬の過信注意",
+        "watch_score": 48.2,
+        "market_gap_score": 36,
+        "ai_hole_horses": [
+          {
+            "horse": 2,
+            "popularity": 7,
+            "top5_votes": 4,
+            "top3_votes": 4,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "avg_rank": 1.25,
+            "popularity_gap": 5.75,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          }
+        ],
+        "ai_low_rated_popular_horses": [
+          {
+            "horse": 11,
+            "popularity": 1,
+            "top5_votes": 0,
+            "top3_votes": 0,
+            "engines": []
+          }
+        ],
+        "consensus_horses": [
+          {
+            "horse": 2,
+            "popularity": 7,
+            "top5_votes": 4,
+            "top3_votes": 4,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 9,
+            "popularity": 11,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 8,
+            "popularity": 3,
+            "top5_votes": 3,
+            "top3_votes": 2,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 6,
+            "popularity": 4,
+            "top5_votes": 3,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 4,
+            "popularity": 5,
+            "top5_votes": 3,
+            "top3_votes": 1,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          }
+        ],
+        "reason": "AI穴: 2番(7人気/AI4基) / 過信注意: 11番(1人気/AI0基) / AI中心: 2番(7人気/AI4基)"
+      }
+    ],
+    "holes": [
+      {
+        "race_id": "2026-03-14-中山-8",
+        "date": "2026-03-14",
+        "race_type": "jra",
+        "venue": "中山",
+        "race_number": 8,
+        "primary_label": "hole_candidate",
+        "label_text": "AI穴馬候補",
+        "suggested_use": "hole_check",
+        "use_text": "AI穴馬チェック",
+        "watch_score": 76.2,
+        "market_gap_score": 78,
+        "ai_hole_horses": [
+          {
+            "horse": 14,
+            "popularity": 11,
+            "top5_votes": 4,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "avg_rank": 3.75,
+            "popularity_gap": 7.25,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 5,
+            "popularity": 7,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "avg_rank": 1.67,
+            "popularity_gap": 5.33,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 11,
+            "popularity": 6,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "avg_rank": 1.0,
+            "popularity_gap": 5.0,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          }
+        ],
+        "ai_low_rated_popular_horses": [],
+        "consensus_horses": [
+          {
+            "horse": 14,
+            "popularity": 11,
+            "top5_votes": 4,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 5,
+            "popularity": 7,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 11,
+            "popularity": 6,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 1,
+            "popularity": 2,
+            "top5_votes": 3,
+            "top3_votes": 1,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          }
+        ],
+        "reason": "AI穴: 14番(11人気/AI4基)、5番(7人気/AI3基) / AI中心: 14番(11人気/AI4基)"
+      },
+      {
+        "race_id": "2026-03-14-帯広-11",
+        "date": "2026-03-14",
+        "race_type": "nar",
+        "venue": "帯広",
+        "race_number": 11,
+        "primary_label": "market_gap",
+        "label_text": "荒れ警戒",
+        "suggested_use": "ai_low_rated_popular_check",
+        "use_text": "人気馬の過信注意",
+        "watch_score": 66.9,
+        "market_gap_score": 72,
+        "ai_hole_horses": [
+          {
+            "horse": 9,
+            "popularity": 9,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "avg_rank": 1.0,
+            "popularity_gap": 8.0,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 1,
+            "popularity": 8,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "avg_rank": 1.67,
+            "popularity_gap": 6.33,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          }
+        ],
+        "ai_low_rated_popular_horses": [
+          {
+            "horse": 8,
+            "popularity": 1,
+            "top5_votes": 0,
+            "top3_votes": 0,
+            "engines": []
+          },
+          {
+            "horse": 6,
+            "popularity": 3,
+            "top5_votes": 0,
+            "top3_votes": 0,
+            "engines": []
+          }
+        ],
+        "consensus_horses": [
+          {
+            "horse": 1,
+            "popularity": 8,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 9,
+            "popularity": 9,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 2,
+            "popularity": 2,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 3,
+            "popularity": 7,
+            "top5_votes": 3,
+            "top3_votes": 1,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 4,
+            "popularity": 10,
+            "top5_votes": 3,
+            "top3_votes": 0,
+            "top1_votes": 0,
+            "best_rank": 4,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          }
+        ],
+        "reason": "AI穴: 9番(9人気/AI3基)、1番(8人気/AI3基) / 過信注意: 8番(1人気/AI0基)、6番(3人気/AI0基) / AI中心: 1番(8人気/AI3基)"
+      },
+      {
+        "race_id": "2026-03-14-中京-9",
+        "date": "2026-03-14",
+        "race_type": "jra",
+        "venue": "中京",
+        "race_number": 9,
+        "primary_label": "market_gap",
+        "label_text": "荒れ警戒",
+        "suggested_use": "ai_low_rated_popular_check",
+        "use_text": "人気馬の過信注意",
+        "watch_score": 66.9,
+        "market_gap_score": 62,
+        "ai_hole_horses": [
+          {
+            "horse": 2,
+            "popularity": 8,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "avg_rank": 3.0,
+            "popularity_gap": 5.0,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 5,
+            "popularity": 5,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "avg_rank": 1.67,
+            "popularity_gap": 3.33,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          }
+        ],
+        "ai_low_rated_popular_horses": [
+          {
+            "horse": 4,
+            "popularity": 3,
+            "top5_votes": 0,
+            "top3_votes": 0,
+            "engines": []
+          }
+        ],
+        "consensus_horses": [
+          {
+            "horse": 8,
+            "popularity": 2,
+            "top5_votes": 4,
+            "top3_votes": 4,
+            "top1_votes": 2,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 5,
+            "popularity": 5,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 2,
+            "popularity": 8,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 1,
+            "popularity": 6,
+            "top5_votes": 3,
+            "top3_votes": 0,
+            "top1_votes": 0,
+            "best_rank": 4,
+            "engines": [
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          }
+        ],
+        "reason": "AI穴: 2番(8人気/AI3基)、5番(5人気/AI3基) / 過信注意: 4番(3人気/AI0基) / AI中心: 8番(2人気/AI4基)"
+      },
+      {
+        "race_id": "2026-03-14-阪神-1",
+        "date": "2026-03-14",
+        "race_type": "jra",
+        "venue": "阪神",
+        "race_number": 1,
+        "primary_label": "market_gap",
+        "label_text": "荒れ警戒",
+        "suggested_use": "ai_low_rated_popular_check",
+        "use_text": "人気馬の過信注意",
+        "watch_score": 63.6,
+        "market_gap_score": 62,
+        "ai_hole_horses": [
+          {
+            "horse": 13,
+            "popularity": 8,
+            "top5_votes": 4,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "avg_rank": 3.75,
+            "popularity_gap": 4.25,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 6,
+            "popularity": 12,
+            "top5_votes": 3,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "avg_rank": 3.33,
+            "popularity_gap": 8.67,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          }
+        ],
+        "ai_low_rated_popular_horses": [
+          {
+            "horse": 4,
+            "popularity": 1,
+            "top5_votes": 0,
+            "top3_votes": 0,
+            "engines": []
+          }
+        ],
+        "consensus_horses": [
+          {
+            "horse": 1,
+            "popularity": 2,
+            "top5_votes": 4,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 13,
+            "popularity": 8,
+            "top5_votes": 4,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 3,
+            "popularity": 5,
+            "top5_votes": 3,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 6,
+            "popularity": 12,
+            "top5_votes": 3,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 8,
+            "popularity": 3,
+            "top5_votes": 3,
+            "top3_votes": 1,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "engines": [
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          }
+        ],
+        "reason": "AI穴: 13番(8人気/AI4基)、6番(12人気/AI3基) / 過信注意: 4番(1人気/AI0基) / AI中心: 1番(2人気/AI4基)"
+      },
+      {
+        "race_id": "2026-03-14-中京-8",
+        "date": "2026-03-14",
+        "race_type": "jra",
+        "venue": "中京",
+        "race_number": 8,
+        "primary_label": "ai_consensus",
+        "label_text": "AI一致",
+        "suggested_use": "hole_check",
+        "use_text": "AI穴馬チェック",
+        "watch_score": 60.9,
+        "market_gap_score": 52,
+        "ai_hole_horses": [
+          {
+            "horse": 14,
+            "popularity": 5,
+            "top5_votes": 4,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "avg_rank": 1.75,
+            "popularity_gap": 3.25,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 16,
+            "popularity": 6,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "avg_rank": 3.0,
+            "popularity_gap": 3.0,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          }
+        ],
+        "ai_low_rated_popular_horses": [],
+        "consensus_horses": [
+          {
+            "horse": 14,
+            "popularity": 5,
+            "top5_votes": 4,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 16,
+            "popularity": 6,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 15,
+            "popularity": 15,
+            "top5_votes": 2,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "ilogic",
+              "metalogic"
+            ]
+          }
+        ],
+        "reason": "AI穴: 14番(5人気/AI4基)、16番(6人気/AI3基) / AI中心: 14番(5人気/AI4基)"
+      },
+      {
+        "race_id": "2026-03-14-中京-12",
+        "date": "2026-03-14",
+        "race_type": "jra",
+        "venue": "中京",
+        "race_number": 12,
+        "primary_label": "hole_candidate",
+        "label_text": "AI穴馬候補",
+        "suggested_use": "hole_check",
+        "use_text": "AI穴馬チェック",
+        "watch_score": 60.4,
+        "market_gap_score": 52,
+        "ai_hole_horses": [
+          {
+            "horse": 7,
+            "popularity": 5,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "avg_rank": 1.0,
+            "popularity_gap": 4.0,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 4,
+            "popularity": 11,
+            "top5_votes": 3,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "avg_rank": 2.67,
+            "popularity_gap": 8.33,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          }
+        ],
+        "ai_low_rated_popular_horses": [],
+        "consensus_horses": [
+          {
+            "horse": 7,
+            "popularity": 5,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 4,
+            "popularity": 11,
+            "top5_votes": 3,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 5,
+            "popularity": 3,
+            "top5_votes": 3,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          }
+        ],
+        "reason": "AI穴: 7番(5人気/AI3基)、4番(11人気/AI3基) / AI中心: 7番(5人気/AI3基)"
+      }
+    ],
+    "consensus": [
+      {
+        "race_id": "2026-03-14-中京-8",
+        "date": "2026-03-14",
+        "race_type": "jra",
+        "venue": "中京",
+        "race_number": 8,
+        "primary_label": "ai_consensus",
+        "label_text": "AI一致",
+        "suggested_use": "hole_check",
+        "use_text": "AI穴馬チェック",
+        "watch_score": 60.9,
+        "market_gap_score": 52,
+        "ai_hole_horses": [
+          {
+            "horse": 14,
+            "popularity": 5,
+            "top5_votes": 4,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "avg_rank": 1.75,
+            "popularity_gap": 3.25,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 16,
+            "popularity": 6,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "avg_rank": 3.0,
+            "popularity_gap": 3.0,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          }
+        ],
+        "ai_low_rated_popular_horses": [],
+        "consensus_horses": [
+          {
+            "horse": 14,
+            "popularity": 5,
+            "top5_votes": 4,
+            "top3_votes": 3,
+            "top1_votes": 3,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 16,
+            "popularity": 6,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 15,
+            "popularity": 15,
+            "top5_votes": 2,
+            "top3_votes": 2,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "ilogic",
+              "metalogic"
+            ]
+          }
+        ],
+        "reason": "AI穴: 14番(5人気/AI4基)、16番(6人気/AI3基) / AI中心: 14番(5人気/AI4基)"
+      },
+      {
+        "race_id": "2026-03-14-佐賀-9",
+        "date": "2026-03-14",
+        "race_type": "nar",
+        "venue": "佐賀",
+        "race_number": 9,
+        "primary_label": "ai_consensus",
+        "label_text": "AI一致",
+        "suggested_use": "hole_check",
+        "use_text": "AI穴馬チェック",
+        "watch_score": 46.0,
+        "market_gap_score": 26,
+        "ai_hole_horses": [
+          {
+            "horse": 3,
+            "popularity": 10,
+            "top5_votes": 4,
+            "top3_votes": 4,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "avg_rank": 2.0,
+            "popularity_gap": 8.0,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          }
+        ],
+        "ai_low_rated_popular_horses": [],
+        "consensus_horses": [
+          {
+            "horse": 3,
+            "popularity": 10,
+            "top5_votes": 4,
+            "top3_votes": 4,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 6,
+            "popularity": 8,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 2,
+            "popularity": 4,
+            "top5_votes": 3,
+            "top3_votes": 2,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "engines": [
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 8,
+            "popularity": 6,
+            "top5_votes": 3,
+            "top3_votes": 1,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 9,
+            "popularity": 11,
+            "top5_votes": 3,
+            "top3_votes": 0,
+            "top1_votes": 0,
+            "best_rank": 4,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          }
+        ],
+        "reason": "AI穴: 3番(10人気/AI4基) / AI中心: 3番(10人気/AI4基)"
+      },
+      {
+        "race_id": "2026-03-14-中山-7",
+        "date": "2026-03-14",
+        "race_type": "jra",
+        "venue": "中山",
+        "race_number": 7,
+        "primary_label": "ai_consensus",
+        "label_text": "AI一致",
+        "suggested_use": "hole_check",
+        "use_text": "AI穴馬チェック",
+        "watch_score": 44.2,
+        "market_gap_score": 26,
+        "ai_hole_horses": [
+          {
+            "horse": 10,
+            "popularity": 8,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "avg_rank": 2.33,
+            "popularity_gap": 5.67,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          }
+        ],
+        "ai_low_rated_popular_horses": [],
+        "consensus_horses": [
+          {
+            "horse": 7,
+            "popularity": 1,
+            "top5_votes": 4,
+            "top3_votes": 4,
+            "top1_votes": 2,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 10,
+            "popularity": 8,
+            "top5_votes": 3,
+            "top3_votes": 3,
+            "top1_votes": 0,
+            "best_rank": 2,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "viewlogic"
+            ]
+          },
+          {
+            "horse": 1,
+            "popularity": 2,
+            "top5_votes": 3,
+            "top3_votes": 2,
+            "top1_votes": 1,
+            "best_rank": 1,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          },
+          {
+            "horse": 9,
+            "popularity": 4,
+            "top5_votes": 3,
+            "top3_votes": 1,
+            "top1_votes": 0,
+            "best_rank": 3,
+            "engines": [
+              "ilogic",
+              "metalogic",
+              "nlogic"
+            ]
+          }
+        ],
+        "reason": "AI穴: 10番(8人気/AI3基) / AI中心: 7番(1人気/AI4基)"
+      }
+    ]
+  },
+  "low_priority_races": [
+    {
+      "race_id": "2026-03-14-中京-2",
+      "date": "2026-03-14",
+      "race_type": "jra",
+      "venue": "中京",
+      "race_number": 2,
+      "primary_label": "skip",
+      "label_text": "低優先度",
+      "suggested_use": "skip",
+      "use_text": "低優先度",
+      "watch_score": 29.5,
+      "market_gap_score": 10,
+      "ai_hole_horses": [],
+      "ai_low_rated_popular_horses": [
+        {
+          "horse": 9,
+          "popularity": 3,
+          "top5_votes": 0,
+          "top3_votes": 0,
+          "engines": []
+        }
+      ],
+      "consensus_horses": [
+        {
+          "horse": 14,
+          "popularity": 15,
+          "top5_votes": 3,
+          "top3_votes": 2,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 11,
+          "popularity": 8,
+          "top5_votes": 3,
+          "top3_votes": 1,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 2,
+          "popularity": 13,
+          "top5_votes": 2,
+          "top3_votes": 2,
+          "top1_votes": 2,
+          "best_rank": 1,
+          "engines": [
+            "metalogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 4,
+          "popularity": 2,
+          "top5_votes": 2,
+          "top3_votes": 2,
+          "top1_votes": 2,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "nlogic"
+          ]
+        }
+      ],
+      "reason": "過信注意: 9番(3人気/AI0基) / AI中心: 14番(15人気/AI3基)"
+    },
+    {
+      "race_id": "2026-03-14-中京-3",
+      "date": "2026-03-14",
+      "race_type": "jra",
+      "venue": "中京",
+      "race_number": 3,
+      "primary_label": "skip",
+      "label_text": "低優先度",
+      "suggested_use": "skip",
+      "use_text": "低優先度",
+      "watch_score": 25.8,
+      "market_gap_score": 0.0,
+      "ai_hole_horses": [],
+      "ai_low_rated_popular_horses": [],
+      "consensus_horses": [
+        {
+          "horse": 5,
+          "popularity": 1,
+          "top5_votes": 4,
+          "top3_votes": 3,
+          "top1_votes": 2,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 12,
+          "popularity": 2,
+          "top5_votes": 4,
+          "top3_votes": 3,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 1,
+          "popularity": 4,
+          "top5_votes": 4,
+          "top3_votes": 1,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 2,
+          "popularity": 12,
+          "top5_votes": 2,
+          "top3_votes": 2,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic"
+          ]
+        }
+      ],
+      "reason": "AI中心: 5番(1人気/AI4基)"
+    },
+    {
+      "race_id": "2026-03-14-中京-5",
+      "date": "2026-03-14",
+      "race_type": "jra",
+      "venue": "中京",
+      "race_number": 5,
+      "primary_label": "skip",
+      "label_text": "低優先度",
+      "suggested_use": "skip",
+      "use_text": "低優先度",
+      "watch_score": 30.5,
+      "market_gap_score": 10,
+      "ai_hole_horses": [],
+      "ai_low_rated_popular_horses": [
+        {
+          "horse": 4,
+          "popularity": 2,
+          "top5_votes": 0,
+          "top3_votes": 0,
+          "engines": []
+        }
+      ],
+      "consensus_horses": [
+        {
+          "horse": 5,
+          "popularity": 3,
+          "top5_votes": 3,
+          "top3_votes": 2,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic"
+          ]
+        },
+        {
+          "horse": 8,
+          "popularity": 5,
+          "top5_votes": 3,
+          "top3_votes": 1,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 2,
+          "popularity": 6,
+          "top5_votes": 2,
+          "top3_votes": 2,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "nlogic"
+          ]
+        },
+        {
+          "horse": 7,
+          "popularity": 7,
+          "top5_votes": 2,
+          "top3_votes": 2,
+          "top1_votes": 2,
+          "best_rank": 1,
+          "engines": [
+            "metalogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 11,
+          "popularity": 10,
+          "top5_votes": 2,
+          "top3_votes": 2,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic"
+          ]
+        }
+      ],
+      "reason": "過信注意: 4番(2人気/AI0基) / AI中心: 5番(3人気/AI3基)"
+    },
+    {
+      "race_id": "2026-03-14-中京-7",
+      "date": "2026-03-14",
+      "race_type": "jra",
+      "venue": "中京",
+      "race_number": 7,
+      "primary_label": "skip",
+      "label_text": "低優先度",
+      "suggested_use": "skip",
+      "use_text": "低優先度",
+      "watch_score": 27.4,
+      "market_gap_score": 0.0,
+      "ai_hole_horses": [],
+      "ai_low_rated_popular_horses": [],
+      "consensus_horses": [
+        {
+          "horse": 6,
+          "popularity": 1,
+          "top5_votes": 4,
+          "top3_votes": 4,
+          "top1_votes": 2,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 7,
+          "popularity": 3,
+          "top5_votes": 4,
+          "top3_votes": 2,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 14,
+          "popularity": 11,
+          "top5_votes": 3,
+          "top3_votes": 1,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic"
+          ]
+        }
+      ],
+      "reason": "AI中心: 6番(1人気/AI4基)"
+    },
+    {
+      "race_id": "2026-03-14-中京-10",
+      "date": "2026-03-14",
+      "race_type": "jra",
+      "venue": "中京",
+      "race_number": 10,
+      "primary_label": "skip",
+      "label_text": "低優先度",
+      "suggested_use": "skip",
+      "use_text": "低優先度",
+      "watch_score": 24.0,
+      "market_gap_score": 0.0,
+      "ai_hole_horses": [],
+      "ai_low_rated_popular_horses": [],
+      "consensus_horses": [
+        {
+          "horse": 6,
+          "popularity": 2,
+          "top5_votes": 4,
+          "top3_votes": 3,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 4,
+          "popularity": 1,
+          "top5_votes": 3,
+          "top3_votes": 3,
+          "top1_votes": 3,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic"
+          ]
+        },
+        {
+          "horse": 7,
+          "popularity": 3,
+          "top5_votes": 3,
+          "top3_votes": 3,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 2,
+          "popularity": 6,
+          "top5_votes": 3,
+          "top3_votes": 1,
+          "top1_votes": 0,
+          "best_rank": 3,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic"
+          ]
+        },
+        {
+          "horse": 5,
+          "popularity": 5,
+          "top5_votes": 3,
+          "top3_votes": 0,
+          "top1_votes": 0,
+          "best_rank": 4,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "viewlogic"
+          ]
+        }
+      ],
+      "reason": "AI中心: 6番(2人気/AI4基)"
+    },
+    {
+      "race_id": "2026-03-14-中京-11",
+      "date": "2026-03-14",
+      "race_type": "jra",
+      "venue": "中京",
+      "race_number": 11,
+      "primary_label": "skip",
+      "label_text": "低優先度",
+      "suggested_use": "skip",
+      "use_text": "低優先度",
+      "watch_score": 24.8,
+      "market_gap_score": 0.0,
+      "ai_hole_horses": [],
+      "ai_low_rated_popular_horses": [],
+      "consensus_horses": [
+        {
+          "horse": 9,
+          "popularity": 2,
+          "top5_votes": 4,
+          "top3_votes": 2,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 7,
+          "popularity": 1,
+          "top5_votes": 3,
+          "top3_votes": 3,
+          "top1_votes": 3,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic"
+          ]
+        },
+        {
+          "horse": 14,
+          "popularity": 3,
+          "top5_votes": 3,
+          "top3_votes": 2,
+          "top1_votes": 0,
+          "best_rank": 3,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic"
+          ]
+        },
+        {
+          "horse": 2,
+          "popularity": 8,
+          "top5_votes": 3,
+          "top3_votes": 0,
+          "top1_votes": 0,
+          "best_rank": 4,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic"
+          ]
+        },
+        {
+          "horse": 5,
+          "popularity": 10,
+          "top5_votes": 2,
+          "top3_votes": 2,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "metalogic",
+            "viewlogic"
+          ]
+        }
+      ],
+      "reason": "AI中心: 9番(2人気/AI4基)"
+    },
+    {
+      "race_id": "2026-03-14-中山-3",
+      "date": "2026-03-14",
+      "race_type": "jra",
+      "venue": "中山",
+      "race_number": 3,
+      "primary_label": "skip",
+      "label_text": "低優先度",
+      "suggested_use": "skip",
+      "use_text": "低優先度",
+      "watch_score": 27.3,
+      "market_gap_score": 0.0,
+      "ai_hole_horses": [],
+      "ai_low_rated_popular_horses": [],
+      "consensus_horses": [
+        {
+          "horse": 13,
+          "popularity": 1,
+          "top5_votes": 4,
+          "top3_votes": 3,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 15,
+          "popularity": 3,
+          "top5_votes": 3,
+          "top3_votes": 2,
+          "top1_votes": 2,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 4,
+          "popularity": 2,
+          "top5_votes": 3,
+          "top3_votes": 1,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic"
+          ]
+        },
+        {
+          "horse": 2,
+          "popularity": 9,
+          "top5_votes": 3,
+          "top3_votes": 1,
+          "top1_votes": 0,
+          "best_rank": 3,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 12,
+          "popularity": 15,
+          "top5_votes": 2,
+          "top3_votes": 2,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "metalogic",
+            "viewlogic"
+          ]
+        }
+      ],
+      "reason": "AI中心: 13番(1人気/AI4基)"
+    },
+    {
+      "race_id": "2026-03-14-中山-5",
+      "date": "2026-03-14",
+      "race_type": "jra",
+      "venue": "中山",
+      "race_number": 5,
+      "primary_label": "skip",
+      "label_text": "低優先度",
+      "suggested_use": "skip",
+      "use_text": "低優先度",
+      "watch_score": 26.6,
+      "market_gap_score": 0.0,
+      "ai_hole_horses": [],
+      "ai_low_rated_popular_horses": [],
+      "consensus_horses": [
+        {
+          "horse": 11,
+          "popularity": 1,
+          "top5_votes": 4,
+          "top3_votes": 4,
+          "top1_votes": 2,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 5,
+          "popularity": 5,
+          "top5_votes": 3,
+          "top3_votes": 2,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 4,
+          "popularity": 2,
+          "top5_votes": 3,
+          "top3_votes": 2,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 9,
+          "popularity": 3,
+          "top5_votes": 3,
+          "top3_votes": 1,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic"
+          ]
+        },
+        {
+          "horse": 2,
+          "popularity": 4,
+          "top5_votes": 3,
+          "top3_votes": 0,
+          "top1_votes": 0,
+          "best_rank": 5,
+          "engines": [
+            "ilogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        }
+      ],
+      "reason": "AI中心: 11番(1人気/AI4基)"
+    },
+    {
+      "race_id": "2026-03-14-中山-9",
+      "date": "2026-03-14",
+      "race_type": "jra",
+      "venue": "中山",
+      "race_number": 9,
+      "primary_label": "skip",
+      "label_text": "低優先度",
+      "suggested_use": "skip",
+      "use_text": "低優先度",
+      "watch_score": 24.1,
+      "market_gap_score": 0.0,
+      "ai_hole_horses": [],
+      "ai_low_rated_popular_horses": [],
+      "consensus_horses": [
+        {
+          "horse": 9,
+          "popularity": 1,
+          "top5_votes": 4,
+          "top3_votes": 4,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 1,
+          "popularity": 5,
+          "top5_votes": 4,
+          "top3_votes": 4,
+          "top1_votes": 0,
+          "best_rank": 3,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 3,
+          "popularity": 3,
+          "top5_votes": 4,
+          "top3_votes": 3,
+          "top1_votes": 3,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 8,
+          "popularity": 6,
+          "top5_votes": 4,
+          "top3_votes": 1,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        }
+      ],
+      "reason": "AI中心: 9番(1人気/AI4基)"
+    },
+    {
+      "race_id": "2026-03-14-佐賀-1",
+      "date": "2026-03-14",
+      "race_type": "nar",
+      "venue": "佐賀",
+      "race_number": 1,
+      "primary_label": "skip",
+      "label_text": "低優先度",
+      "suggested_use": "skip",
+      "use_text": "低優先度",
+      "watch_score": 25.0,
+      "market_gap_score": 0.0,
+      "ai_hole_horses": [],
+      "ai_low_rated_popular_horses": [],
+      "consensus_horses": [
+        {
+          "horse": 1,
+          "popularity": 1,
+          "top5_votes": 4,
+          "top3_votes": 2,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 7,
+          "popularity": 3,
+          "top5_votes": 3,
+          "top3_votes": 1,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 2,
+          "popularity": 7,
+          "top5_votes": 2,
+          "top3_votes": 2,
+          "top1_votes": 2,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic"
+          ]
+        },
+        {
+          "horse": 8,
+          "popularity": 8,
+          "top5_votes": 2,
+          "top3_votes": 2,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic"
+          ]
+        },
+        {
+          "horse": 9,
+          "popularity": 5,
+          "top5_votes": 2,
+          "top3_votes": 2,
+          "top1_votes": 0,
+          "best_rank": 3,
+          "engines": [
+            "ilogic",
+            "metalogic"
+          ]
+        }
+      ],
+      "reason": "AI中心: 1番(1人気/AI4基)"
+    },
+    {
+      "race_id": "2026-03-14-佐賀-2",
+      "date": "2026-03-14",
+      "race_type": "nar",
+      "venue": "佐賀",
+      "race_number": 2,
+      "primary_label": "skip",
+      "label_text": "低優先度",
+      "suggested_use": "skip",
+      "use_text": "低優先度",
+      "watch_score": 33.2,
+      "market_gap_score": 10,
+      "ai_hole_horses": [],
+      "ai_low_rated_popular_horses": [
+        {
+          "horse": 12,
+          "popularity": 3,
+          "top5_votes": 0,
+          "top3_votes": 0,
+          "engines": []
+        }
+      ],
+      "consensus_horses": [
+        {
+          "horse": 2,
+          "popularity": 10,
+          "top5_votes": 3,
+          "top3_votes": 3,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic"
+          ]
+        },
+        {
+          "horse": 3,
+          "popularity": 5,
+          "top5_votes": 3,
+          "top3_votes": 2,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 10,
+          "popularity": 2,
+          "top5_votes": 3,
+          "top3_votes": 2,
+          "top1_votes": 0,
+          "best_rank": 3,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 8,
+          "popularity": 4,
+          "top5_votes": 3,
+          "top3_votes": 1,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "viewlogic"
+          ]
+        }
+      ],
+      "reason": "過信注意: 12番(3人気/AI0基) / AI中心: 2番(10人気/AI3基)"
+    },
+    {
+      "race_id": "2026-03-14-佐賀-3",
+      "date": "2026-03-14",
+      "race_type": "nar",
+      "venue": "佐賀",
+      "race_number": 3,
+      "primary_label": "skip",
+      "label_text": "低優先度",
+      "suggested_use": "skip",
+      "use_text": "低優先度",
+      "watch_score": 26.6,
+      "market_gap_score": 0.0,
+      "ai_hole_horses": [],
+      "ai_low_rated_popular_horses": [],
+      "consensus_horses": [
+        {
+          "horse": 10,
+          "popularity": 10,
+          "top5_votes": 4,
+          "top3_votes": 0,
+          "top1_votes": 0,
+          "best_rank": 4,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 2,
+          "popularity": 4,
+          "top5_votes": 3,
+          "top3_votes": 3,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 7,
+          "popularity": 3,
+          "top5_votes": 3,
+          "top3_votes": 2,
+          "top1_votes": 2,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 1,
+          "popularity": 8,
+          "top5_votes": 3,
+          "top3_votes": 2,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 5,
+          "popularity": 2,
+          "top5_votes": 3,
+          "top3_votes": 2,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "viewlogic"
+          ]
+        }
+      ],
+      "reason": "AI中心: 10番(10人気/AI4基)"
+    },
+    {
+      "race_id": "2026-03-14-佐賀-5",
+      "date": "2026-03-14",
+      "race_type": "nar",
+      "venue": "佐賀",
+      "race_number": 5,
+      "primary_label": "skip",
+      "label_text": "低優先度",
+      "suggested_use": "skip",
+      "use_text": "低優先度",
+      "watch_score": 25.1,
+      "market_gap_score": 0.0,
+      "ai_hole_horses": [],
+      "ai_low_rated_popular_horses": [],
+      "consensus_horses": [
+        {
+          "horse": 5,
+          "popularity": 1,
+          "top5_votes": 4,
+          "top3_votes": 4,
+          "top1_votes": 2,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 1,
+          "popularity": 4,
+          "top5_votes": 4,
+          "top3_votes": 3,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 3,
+          "popularity": 5,
+          "top5_votes": 4,
+          "top3_votes": 0,
+          "top1_votes": 0,
+          "best_rank": 4,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 4,
+          "popularity": 2,
+          "top5_votes": 3,
+          "top3_votes": 2,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic"
+          ]
+        },
+        {
+          "horse": 2,
+          "popularity": 3,
+          "top5_votes": 3,
+          "top3_votes": 2,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        }
+      ],
+      "reason": "AI中心: 5番(1人気/AI4基)"
+    },
+    {
+      "race_id": "2026-03-14-佐賀-7",
+      "date": "2026-03-14",
+      "race_type": "nar",
+      "venue": "佐賀",
+      "race_number": 7,
+      "primary_label": "skip",
+      "label_text": "低優先度",
+      "suggested_use": "skip",
+      "use_text": "低優先度",
+      "watch_score": 26.6,
+      "market_gap_score": 0.0,
+      "ai_hole_horses": [],
+      "ai_low_rated_popular_horses": [],
+      "consensus_horses": [
+        {
+          "horse": 10,
+          "popularity": 3,
+          "top5_votes": 4,
+          "top3_votes": 0,
+          "top1_votes": 0,
+          "best_rank": 5,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 1,
+          "popularity": 7,
+          "top5_votes": 3,
+          "top3_votes": 3,
+          "top1_votes": 2,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 3,
+          "popularity": 5,
+          "top5_votes": 3,
+          "top3_votes": 3,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 8,
+          "popularity": 2,
+          "top5_votes": 3,
+          "top3_votes": 3,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic"
+          ]
+        },
+        {
+          "horse": 6,
+          "popularity": 1,
+          "top5_votes": 3,
+          "top3_votes": 0,
+          "top1_votes": 0,
+          "best_rank": 4,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic"
+          ]
+        }
+      ],
+      "reason": "AI中心: 10番(3人気/AI4基)"
+    },
+    {
+      "race_id": "2026-03-14-佐賀-8",
+      "date": "2026-03-14",
+      "race_type": "nar",
+      "venue": "佐賀",
+      "race_number": 8,
+      "primary_label": "skip",
+      "label_text": "低優先度",
+      "suggested_use": "skip",
+      "use_text": "低優先度",
+      "watch_score": 24.0,
+      "market_gap_score": 0.0,
+      "ai_hole_horses": [],
+      "ai_low_rated_popular_horses": [],
+      "consensus_horses": [
+        {
+          "horse": 2,
+          "popularity": 7,
+          "top5_votes": 3,
+          "top3_votes": 2,
+          "top1_votes": 2,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 3,
+          "popularity": 5,
+          "top5_votes": 3,
+          "top3_votes": 2,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic"
+          ]
+        },
+        {
+          "horse": 11,
+          "popularity": 3,
+          "top5_votes": 2,
+          "top3_votes": 2,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic"
+          ]
+        },
+        {
+          "horse": 9,
+          "popularity": 9,
+          "top5_votes": 2,
+          "top3_votes": 2,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "metalogic",
+            "viewlogic"
+          ]
+        }
+      ],
+      "reason": "AI中心: 2番(7人気/AI3基)"
+    },
+    {
+      "race_id": "2026-03-14-佐賀-10",
+      "date": "2026-03-14",
+      "race_type": "nar",
+      "venue": "佐賀",
+      "race_number": 10,
+      "primary_label": "skip",
+      "label_text": "低優先度",
+      "suggested_use": "skip",
+      "use_text": "低優先度",
+      "watch_score": 24.1,
+      "market_gap_score": 0.0,
+      "ai_hole_horses": [],
+      "ai_low_rated_popular_horses": [],
+      "consensus_horses": [
+        {
+          "horse": 4,
+          "popularity": 6,
+          "top5_votes": 4,
+          "top3_votes": 4,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 8,
+          "popularity": 7,
+          "top5_votes": 4,
+          "top3_votes": 2,
+          "top1_votes": 0,
+          "best_rank": 3,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 2,
+          "popularity": 3,
+          "top5_votes": 3,
+          "top3_votes": 3,
+          "top1_votes": 3,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 5,
+          "popularity": 4,
+          "top5_votes": 3,
+          "top3_votes": 1,
+          "top1_votes": 0,
+          "best_rank": 3,
+          "engines": [
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        }
+      ],
+      "reason": "AI中心: 4番(6人気/AI4基)"
+    },
+    {
+      "race_id": "2026-03-14-佐賀-12",
+      "date": "2026-03-14",
+      "race_type": "nar",
+      "venue": "佐賀",
+      "race_number": 12,
+      "primary_label": "skip",
+      "label_text": "低優先度",
+      "suggested_use": "skip",
+      "use_text": "低優先度",
+      "watch_score": 27.3,
+      "market_gap_score": 0.0,
+      "ai_hole_horses": [],
+      "ai_low_rated_popular_horses": [],
+      "consensus_horses": [
+        {
+          "horse": 3,
+          "popularity": 9,
+          "top5_votes": 4,
+          "top3_votes": 1,
+          "top1_votes": 0,
+          "best_rank": 3,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 2,
+          "popularity": 4,
+          "top5_votes": 3,
+          "top3_votes": 3,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic"
+          ]
+        },
+        {
+          "horse": 8,
+          "popularity": 2,
+          "top5_votes": 3,
+          "top3_votes": 3,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 4,
+          "popularity": 1,
+          "top5_votes": 3,
+          "top3_votes": 0,
+          "top1_votes": 0,
+          "best_rank": 4,
+          "engines": [
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 7,
+          "popularity": 8,
+          "top5_votes": 2,
+          "top3_votes": 2,
+          "top1_votes": 2,
+          "best_rank": 1,
+          "engines": [
+            "metalogic",
+            "viewlogic"
+          ]
+        }
+      ],
+      "reason": "AI中心: 3番(9人気/AI4基)"
+    },
+    {
+      "race_id": "2026-03-14-阪神-2",
+      "date": "2026-03-14",
+      "race_type": "jra",
+      "venue": "阪神",
+      "race_number": 2,
+      "primary_label": "skip",
+      "label_text": "低優先度",
+      "suggested_use": "skip",
+      "use_text": "低優先度",
+      "watch_score": 25.1,
+      "market_gap_score": 0.0,
+      "ai_hole_horses": [],
+      "ai_low_rated_popular_horses": [],
+      "consensus_horses": [
+        {
+          "horse": 13,
+          "popularity": 2,
+          "top5_votes": 4,
+          "top3_votes": 2,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 6,
+          "popularity": 3,
+          "top5_votes": 4,
+          "top3_votes": 2,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 2,
+          "popularity": 1,
+          "top5_votes": 3,
+          "top3_votes": 3,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic"
+          ]
+        },
+        {
+          "horse": 8,
+          "popularity": 4,
+          "top5_votes": 3,
+          "top3_votes": 2,
+          "top1_votes": 2,
+          "best_rank": 1,
+          "engines": [
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 7,
+          "popularity": 6,
+          "top5_votes": 3,
+          "top3_votes": 2,
+          "top1_votes": 0,
+          "best_rank": 3,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "viewlogic"
+          ]
+        }
+      ],
+      "reason": "AI中心: 13番(2人気/AI4基)"
+    },
+    {
+      "race_id": "2026-03-14-阪神-3",
+      "date": "2026-03-14",
+      "race_type": "jra",
+      "venue": "阪神",
+      "race_number": 3,
+      "primary_label": "skip",
+      "label_text": "低優先度",
+      "suggested_use": "skip",
+      "use_text": "低優先度",
+      "watch_score": 25.8,
+      "market_gap_score": 0.0,
+      "ai_hole_horses": [],
+      "ai_low_rated_popular_horses": [],
+      "consensus_horses": [
+        {
+          "horse": 8,
+          "popularity": 1,
+          "top5_votes": 4,
+          "top3_votes": 3,
+          "top1_votes": 2,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 9,
+          "popularity": 4,
+          "top5_votes": 4,
+          "top3_votes": 2,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 3,
+          "popularity": 2,
+          "top5_votes": 3,
+          "top3_votes": 3,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 2,
+          "popularity": 10,
+          "top5_votes": 2,
+          "top3_votes": 2,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "metalogic",
+            "viewlogic"
+          ]
+        }
+      ],
+      "reason": "AI中心: 8番(1人気/AI4基)"
+    },
+    {
+      "race_id": "2026-03-14-阪神-5",
+      "date": "2026-03-14",
+      "race_type": "jra",
+      "venue": "阪神",
+      "race_number": 5,
+      "primary_label": "skip",
+      "label_text": "低優先度",
+      "suggested_use": "skip",
+      "use_text": "低優先度",
+      "watch_score": 27.4,
+      "market_gap_score": 0.0,
+      "ai_hole_horses": [],
+      "ai_low_rated_popular_horses": [],
+      "consensus_horses": [
+        {
+          "horse": 1,
+          "popularity": 2,
+          "top5_votes": 4,
+          "top3_votes": 4,
+          "top1_votes": 2,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 4,
+          "popularity": 1,
+          "top5_votes": 4,
+          "top3_votes": 4,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 17,
+          "popularity": 3,
+          "top5_votes": 4,
+          "top3_votes": 3,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        }
+      ],
+      "reason": "AI中心: 1番(2人気/AI4基)"
+    },
+    {
+      "race_id": "2026-03-14-阪神-6",
+      "date": "2026-03-14",
+      "race_type": "jra",
+      "venue": "阪神",
+      "race_number": 6,
+      "primary_label": "skip",
+      "label_text": "低優先度",
+      "suggested_use": "skip",
+      "use_text": "低優先度",
+      "watch_score": 28.1,
+      "market_gap_score": 0.0,
+      "ai_hole_horses": [],
+      "ai_low_rated_popular_horses": [],
+      "consensus_horses": [
+        {
+          "horse": 10,
+          "popularity": 1,
+          "top5_votes": 4,
+          "top3_votes": 4,
+          "top1_votes": 2,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 9,
+          "popularity": 2,
+          "top5_votes": 3,
+          "top3_votes": 3,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic"
+          ]
+        },
+        {
+          "horse": 13,
+          "popularity": 7,
+          "top5_votes": 3,
+          "top3_votes": 0,
+          "top1_votes": 0,
+          "best_rank": 4,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic"
+          ]
+        },
+        {
+          "horse": 12,
+          "popularity": 4,
+          "top5_votes": 3,
+          "top3_votes": 0,
+          "top1_votes": 0,
+          "best_rank": 5,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic"
+          ]
+        },
+        {
+          "horse": 8,
+          "popularity": 5,
+          "top5_votes": 2,
+          "top3_votes": 2,
+          "top1_votes": 1,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic"
+          ]
+        }
+      ],
+      "reason": "AI中心: 10番(1人気/AI4基)"
+    },
+    {
+      "race_id": "2026-03-14-阪神-11",
+      "date": "2026-03-14",
+      "race_type": "jra",
+      "venue": "阪神",
+      "race_number": 11,
+      "primary_label": "skip",
+      "label_text": "低優先度",
+      "suggested_use": "skip",
+      "use_text": "低優先度",
+      "watch_score": 24.8,
+      "market_gap_score": 0.0,
+      "ai_hole_horses": [],
+      "ai_low_rated_popular_horses": [],
+      "consensus_horses": [
+        {
+          "horse": 1,
+          "popularity": 1,
+          "top5_votes": 4,
+          "top3_votes": 4,
+          "top1_votes": 3,
+          "best_rank": 1,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 4,
+          "popularity": 3,
+          "top5_votes": 4,
+          "top3_votes": 2,
+          "top1_votes": 0,
+          "best_rank": 3,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 12,
+          "popularity": 4,
+          "top5_votes": 3,
+          "top3_votes": 1,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "nlogic"
+          ]
+        },
+        {
+          "horse": 13,
+          "popularity": 13,
+          "top5_votes": 3,
+          "top3_votes": 0,
+          "top1_votes": 0,
+          "best_rank": 4,
+          "engines": [
+            "ilogic",
+            "metalogic",
+            "viewlogic"
+          ]
+        },
+        {
+          "horse": 10,
+          "popularity": 8,
+          "top5_votes": 2,
+          "top3_votes": 2,
+          "top1_votes": 0,
+          "best_rank": 2,
+          "engines": [
+            "ilogic",
+            "metalogic"
+          ]
+        }
+      ],
+      "reason": "AI中心: 1番(1人気/AI4基)"
+    }
+  ]
+}
