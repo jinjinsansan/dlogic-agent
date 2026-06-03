@@ -1,0 +1,22 @@
+# 再構築用 systemd ユニット (2026-06-03 復元・新VPS用に再作成)
+# 出典: gunicorn_conf.py (bind :5000, worker_class=gevent) + CLAUDE.md (8 workers)
+# 配置先: /etc/systemd/system/dlogic-linebot.service
+# 注意: Xserver からオリジナルが復元できた場合はそちらを正とし、差分のみ反映すること。
+[Unit]
+Description=Dlogic LINE Bot (Gunicorn + gevent, port 5000)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/dlogic/linebot
+Environment=HOME=/root
+Environment=GUNICORN_WORKERS=8
+Environment=GUNICORN_WORKER_CONNECTIONS=1000
+# config.py が WorkingDirectory の .env.local を load_dotenv で読む
+ExecStart=/opt/dlogic/linebot/venv/bin/gunicorn -c gunicorn_conf.py app:app
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

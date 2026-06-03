@@ -1,0 +1,21 @@
+# 再構築用 systemd ユニット (2026-06-03 復元・新VPS用に再作成)
+# 出典: uma/backend/main.py 末尾 (uvicorn main:app port 8000) + nginx_dlogic.conf (proxy 127.0.0.1:8000)
+# 配置先: /etc/systemd/system/dlogic-backend.service
+# ⚠️ VPS実機では entrypoint が main_lite.py だった (CLAUDE.md)。main_lite.py はローカル/gitに無く消失。
+#    main.py (734行フル版) が母体。新VPSでは main:app を使い、不要routerはコメントアウトで軽量化する。
+#    Xserver から main_lite.py を復元できたら ExecStart を main_lite:app に戻すこと。
+[Unit]
+Description=Dlogic Prediction Backend (FastAPI / Uvicorn, port 8000)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/dlogic/backend
+Environment=HOME=/root
+ExecStart=/opt/dlogic/backend/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
