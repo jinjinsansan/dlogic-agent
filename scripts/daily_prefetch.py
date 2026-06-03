@@ -27,7 +27,7 @@ os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(PREFETCH_DIR, exist_ok=True)
 
 # VPS設定
-VPS_HOST = "220.158.24.157"
+VPS_HOST = "210.131.208.243"
 VPS_USER = "root"
 VPS_PREFETCH_DIR = "/opt/dlogic/linebot/data/prefetch"
 

@@ -9,4 +9,9 @@ line-bot-sdk>=3.0.0
 flask>=3.0.0
 flask-cors>=6.0.0
 gunicorn>=21.0.0
+gevent>=24.0.0
 redis>=5.0.0
+supabase>=2.4.0
+# JRA real-time odds use Lightpanda (/usr/local/bin/lightpanda) with Playwright
+# (chromium) fallback. Lightpanda is installed as a standalone binary, not via pip.
+# playwright>=1.40.0  # optional fallback; chromium needs `playwright install chromium`
