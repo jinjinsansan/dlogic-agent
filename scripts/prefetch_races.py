@@ -61,7 +61,14 @@ def fetch_soup(url, encoding="euc-jp"):
                     time.sleep(2 ** attempt)
                     continue
                 return None
-            resp.encoding = encoding
+            # 文字コードはページ宣言(HTTPヘッダ/metaのcharset)を優先する。
+            # netkeibaはページによりUTF-8/EUC-JPが混在し、かつUTF-8へ移行が進んでいるため
+            # 引数encodingの固定は使わない(ヘッダ未宣言=iso-8859-1等の時だけ自動判定にフォールバック)。
+            hdr = (resp.encoding or "").lower()
+            if hdr and hdr not in ("iso-8859-1", "ascii", "us-ascii"):
+                pass  # サーバー宣言の文字コードを信頼
+            else:
+                resp.encoding = resp.apparent_encoding or encoding
             html_text = resp.text
             if not html_text or len(html_text.strip()) < 100:
                 print(f"  WARN: Empty response - {url}")
