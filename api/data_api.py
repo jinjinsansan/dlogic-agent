@@ -25,6 +25,12 @@ logger = logging.getLogger(__name__)
 
 bp = Blueprint("data_api", __name__, url_prefix="/api/data")
 
+# /golden-pattern/today 応答キャッシュ (date+race_type → response)
+# 当日中は同じ買い目を返すため (Telegram配信と一致させる)。
+# 日付が変わると自動的に無効化される (key に date を含むため)。
+# gunicorn 各 worker でローカルだが、同レース計算は最大 worker 数回まで圧縮される。
+_today_cache: dict[str, tuple[str, dict]] = {}
+
 # Golden pattern v6 (2026-04-27 Plan A デプロイ)
 # Clean 2ヶ月データで leakage 除去後、4/25旧監査の本命厳格条件のみが S級として残った
 # (CI下限 225%, n=145, 回収率396.9%)。v5 は汚染データ由来として全廃止。
@@ -439,6 +445,12 @@ def get_golden_pattern_today():
     except ValueError:
         return jsonify({"error": "invalid date format, use YYYYMMDD"}), 400
 
+    # 当日固定キャッシュ (買い目は当日中変わらない方針)
+    cache_key = f"{date_str}-{race_type}"
+    cached = _today_cache.get(cache_key)
+    if cached and cached[0] == date_str:
+        return jsonify(cached[1])
+
     prefetch = _load_prefetch(date_str)
     if not prefetch:
         # Fallback: load saved snapshot (preserved beyond prefetch retention)
@@ -452,6 +464,7 @@ def get_golden_pattern_today():
                     is_local_filter = (race_type == "nar")
                     snap["races"] = [r for r in snap["races"] if bool(r.get("is_local")) == is_local_filter]
                 snap["source"] = "snapshot"
+                _today_cache[cache_key] = (date_str, snap)
                 return jsonify(snap)
             except Exception as e:
                 logger.warning(f"snapshot load failed for {date_str}: {e}")
@@ -568,9 +581,160 @@ def get_golden_pattern_today():
         })
 
     weekday_ja = ["月", "火", "水", "木", "金", "土", "日"][weekday]
-    return jsonify({
+    result = {
         "date": date_str,
         "weekday": weekday_ja,
         "summary": summary,
         "races": enriched,
+    }
+    _today_cache[cache_key] = (date_str, result)
+    return jsonify(result)
+
+
+@bp.route("/golden-pattern/history", methods=["GET"])
+def get_golden_pattern_history():
+    """Layer 1 (NAR本命厳格) の過去スナップショットを集計して履歴を返す。
+
+    Query params:
+        race_type: nar (default) — 現在は NAR 限定
+        days: 集計対象日数 (default: all = 全スナップショット)
+
+    Returns:
+        {
+          "summary": {n, hits, invest, payout, profit, recovery_pct, hit_rate_pct},
+          "monthly": [{ym, n, hits, invest, payout, profit, recovery_pct}],
+          "races": [{date, weekday, venue, race_number, race_name,
+                     horse_number, horse_name, popularity_rank,
+                     agreed_count, won, payout, profit}]
+        }
+        races は date 降順 (新しい→古い)
+    """
+    race_type = request.args.get("race_type", "nar")
+    days_param = request.args.get("days")
+
+    # スナップショットファイルを date 順に列挙
+    if not os.path.isdir(SNAPSHOT_DIR):
+        return jsonify({"summary": {}, "monthly": [], "races": []})
+
+    snapshot_files = sorted(
+        f for f in os.listdir(SNAPSHOT_DIR)
+        if f.endswith('.json') and len(f) == 13 and f[:8].isdigit()
+    )
+    if days_param:
+        try:
+            n_days = int(days_param)
+            if n_days > 0:
+                snapshot_files = snapshot_files[-n_days:]
+        except ValueError:
+            pass
+
+    races_out: list[dict] = []
+    monthly_acc: dict[str, dict] = {}
+    total_n = total_hits = total_invest = total_payout = 0
+    total_finished = 0  # 結果が確定している件数（投資/払戻計算の母数）
+
+    weekday_ja = ["月", "火", "水", "木", "金", "土", "日"]
+
+    for fname in snapshot_files:
+        date_str = fname[:8]  # YYYYMMDD
+        try:
+            with open(os.path.join(SNAPSHOT_DIR, fname), 'r', encoding='utf-8') as f:
+                snap = json.load(f)
+        except Exception as e:
+            logger.warning(f"history: failed to load {fname}: {e}")
+            continue
+
+        try:
+            wd = datetime.strptime(date_str, "%Y%m%d").weekday()
+        except ValueError:
+            continue
+
+        ym = f"{date_str[:4]}-{date_str[4:6]}"
+
+        for r in (snap.get("races") or []):
+            if not r.get("is_golden_strict"):
+                continue
+            if race_type == "nar" and not r.get("is_local"):
+                continue
+            if race_type == "jra" and r.get("is_local"):
+                continue
+
+            cons = r.get("consensus") or {}
+            result = r.get("result")
+
+            # サマリー件数（該当レース総数）
+            total_n += 1
+            m = monthly_acc.setdefault(ym, {
+                "ym": ym, "n": 0, "hits": 0,
+                "invest": 0, "payout": 0, "finished": 0,
+            })
+            m["n"] += 1
+
+            won = False
+            payout = 0
+            profit = None
+            if result:
+                # 結果確定済み → 集計対象
+                won = bool(result.get("did_consensus_win"))
+                payout = int(result.get("win_payout") or 0) if won else 0
+                profit = (payout - 100)
+                total_finished += 1
+                total_invest += 100
+                total_payout += payout
+                if won:
+                    total_hits += 1
+                m["finished"] += 1
+                m["invest"] += 100
+                m["payout"] += payout
+                if won:
+                    m["hits"] += 1
+
+            races_out.append({
+                "date": date_str,
+                "weekday": weekday_ja[wd],
+                "venue": r.get("venue", ""),
+                "race_number": r.get("race_number", 0),
+                "race_name": r.get("race_name", ""),
+                "horse_number": cons.get("horse_number"),
+                "horse_name": cons.get("horse_name", ""),
+                "popularity_rank": r.get("popularity_rank"),
+                "agreed_count": cons.get("count", 0),
+                "result_known": result is not None,
+                "won": won,
+                "payout": payout,
+                "profit": profit,
+            })
+
+    # サマリー算出
+    recovery_pct = (total_payout / total_invest * 100) if total_invest > 0 else 0
+    hit_rate_pct = (total_hits / total_finished * 100) if total_finished > 0 else 0
+    summary = {
+        "n_total": total_n,            # 該当レース総数
+        "n_finished": total_finished,  # 結果確定件数
+        "hits": total_hits,
+        "invest": total_invest,
+        "payout": total_payout,
+        "profit": total_payout - total_invest,
+        "recovery_pct": round(recovery_pct, 1),
+        "hit_rate_pct": round(hit_rate_pct, 1),
+    }
+
+    # 月別を ym 昇順で
+    monthly = []
+    for ym in sorted(monthly_acc.keys()):
+        m = monthly_acc[ym]
+        m_recov = (m["payout"] / m["invest"] * 100) if m["invest"] > 0 else 0
+        monthly.append({
+            **m,
+            "profit": m["payout"] - m["invest"],
+            "recovery_pct": round(m_recov, 1),
+        })
+
+    # レース一覧は date 降順
+    races_out.sort(key=lambda x: x["date"], reverse=True)
+
+    return jsonify({
+        "summary": summary,
+        "monthly": monthly,
+        "races": races_out,
     })
