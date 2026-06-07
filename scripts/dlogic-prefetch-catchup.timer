@@ -1,0 +1,11 @@
+[Unit]
+Description=netkeita prefetch catch-up timer (race-day朝に複数回・冪等)
+
+[Timer]
+# 06:00-09:30 JST に30分毎。前夜18:00のプリフェッチがnetkeiba未公開で失敗しても、
+# 朝(公開後)に当日ファイルを補完する。完全なら何もしない。
+OnCalendar=*-*-* 06,07,08,09:00/30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

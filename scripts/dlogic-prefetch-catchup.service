@@ -1,0 +1,9 @@
+[Unit]
+Description=netkeita prefetch catch-up (当日JRA/NAR欠落を朝に自動補完)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/dlogic/linebot
+ExecStart=/opt/dlogic/linebot/venv/bin/python3 /opt/dlogic/linebot/scripts/prefetch_catchup.py
+TimeoutStartSec=600
