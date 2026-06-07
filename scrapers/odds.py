@@ -9,14 +9,45 @@ import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import requests
+
 from scrapers.base import fetch_with_retry
 from config import NETKEIBA_JRA_BASE, NETKEIBA_NAR_BASE
 
 logger = logging.getLogger(__name__)
 
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 LIGHTPANDA_BIN = shutil.which("lightpanda") or "/usr/local/bin/lightpanda"
 LIGHTPANDA_TIMEOUT = 20  # seconds per page
 LIGHTPANDA_WORKERS = 6
+
+
+def _fetch_jra_odds_api(race_id: str) -> dict[int, float] | None:
+    """Fetch JRA win odds via netkeiba JSON API (JS不要・最も確実).
+
+    api_get_jra_odds.html?race_id=<12桁>&type=1&action=init
+    → data.odds["1"]["NN"] = [odds, ?, 人気]  (type1=単勝, NN=馬番)
+    Lightpanda/Playwright での shutuba.html スクレイプは壊れやすいため本APIを最優先で使う。
+    """
+    url = (f"{NETKEIBA_JRA_BASE}/api/api_get_jra_odds.html"
+           f"?race_id={race_id}&type=1&action=init")
+    try:
+        resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=15)
+        data = resp.json()
+    except Exception:
+        logger.debug(f"JRA odds API failed: {race_id}", exc_info=True)
+        return None
+    tansho = (((data or {}).get("data") or {}).get("odds") or {}).get("1") or {}
+    odds_map = {}
+    for k, v in tansho.items():
+        try:
+            num = int(k)
+            val = float(v[0]) if isinstance(v, (list, tuple)) else float(v)
+        except (ValueError, TypeError, IndexError):
+            continue
+        if val > 0:
+            odds_map[num] = val
+    return odds_map if odds_map else None
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +207,12 @@ def fetch_realtime_odds(race_id: str, race_type: str = "jra") -> dict | None:
         Dict with horse_number (int) -> odds (float) mapping, or None.
     """
     if race_type != "nar":
-        # JRA: try Lightpanda first, then Playwright
+        # JRA: JSON API最優先(JS不要で確実) → Lightpanda → Playwright
+        odds = _fetch_jra_odds_api(race_id)
+        if odds:
+            logger.info(f"JRA realtime odds via API: {race_id} -> {len(odds)} horses")
+            return odds
+
         odds = _fetch_jra_odds_lightpanda(race_id)
         if odds:
             logger.info(f"JRA realtime odds via Lightpanda: {race_id} -> {len(odds)} horses")
